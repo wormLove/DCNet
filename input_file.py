@@ -3,23 +3,15 @@ import numpy as np
 from typing import List
 import warnings
 
-def clean_data(data_array):
-    #function to clean data
-    #need additional cleaning steps like normalization
-    data_array[np.isnan(data_array)] = 0 # type: ignore
-
-    return data_array
-
-def get_sheet_data(f:dict, sheet:str):
+def get_sheet_data(f: dict, sheet: str):
     df = f[sheet]
 
     data_as_array = df.to_numpy()
-    processed_data = clean_data(data_as_array)
-    data_size = processed_data.shape
+    data_size = data_as_array.shape
     
-    return processed_data, data_size
+    return data_as_array, data_size
 
-def get_sheet_labels(f:dict, sheet:str, ncols:int, header:bool):
+def get_sheet_labels(f: dict, sheet: str, ncols: int, header: bool):
     df = f[sheet]
     
     if header:
@@ -32,7 +24,7 @@ def get_sheet_labels(f:dict, sheet:str, ncols:int, header:bool):
     return data_labels
         
 
-def read_sheet(f:dict, sheet:str, header:bool = True):
+def read_sheet(f: dict, sheet: str, header: bool = True):
     sheet_dict = {}
     
     data_values, data_size = get_sheet_data(f, sheet)
@@ -42,7 +34,7 @@ def read_sheet(f:dict, sheet:str, header:bool = True):
 
     return sheet_dict
 
-def read_data_file(file_path:str, header:bool = True, sheets:List[str] = []):
+def read_data(file_path: str, header: bool = True, sheets: List[str] = []):
     f = pd.read_excel(file_path, None)
     sheet_names_from_file = str(set(f.keys()))
     
