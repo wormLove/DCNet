@@ -3,7 +3,7 @@ import numpy as np
 from typing import List
 import warnings
 
-def get_unique_data_labels(data_dict:dict):
+def unique_data_labels(data_dict:dict):
     list_of_lists = [data_dict[sheet]['labels'] for sheet in data_dict.keys()]
     list_of_labels = []
     for each_list in list_of_lists:
@@ -13,20 +13,20 @@ def get_unique_data_labels(data_dict:dict):
     unique_labels = set(list_of_labels)
     return unique_labels
 
-def get_nsamples(data_dict:dict):
+def nsamples(data_dict:dict):
     nsamples = 0
     for sheet in data_dict.keys():
         nsamples += data_dict[sheet]['size'][1]
 
     return nsamples
 
-def get_nclass(data_dict:dict):
-    unique_labels = get_unique_data_labels(data_dict)
+def nclass(data_dict:dict):
+    unique_labels = unique_data_labels(data_dict)
     return len(unique_labels)
    
 
-def organize_data_with_labels(data_dict:dict):
-    unique_labels, nclass = get_unique_data_labels(data_dict)
+def label_data(data_dict:dict):
+    unique_labels, nclass = unique_data_labels(data_dict)
     data_dims = [data_dict[sheet]['size'][0] for sheet in data_dict.keys()]
     
     if len(set(data_dims)) != 1:
