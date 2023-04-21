@@ -15,7 +15,7 @@ def get_sheet_labels(f: dict, sheet: str, ncols: int, header: bool):
     df = f[sheet]
     
     if header:
-        data_labels = list(df.columns.values)
+        data_labels = [str(value) for value in list(df.columns.values)]
         if len(data_labels) != ncols:
             raise Exception("improper labels")
     else:

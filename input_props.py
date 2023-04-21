@@ -5,6 +5,25 @@ import warnings
 
 import input_clean
 
+def max_sheet_props(data_dict: dict):
+    max_sheet_dim = 0
+    for sheet in data_dict.keys():
+        sheet_dim = data_dict[sheet]['size'][0]
+        if sheet_dim > max_sheet_dim:
+            max_sheet_dim = sheet_dim
+
+    return max_sheet_dim
+
+def conform_data(data_dict: dict):
+    max_dim = max_sheet_props(data_dict)
+    for sheet in data_dict.keys():
+        sheet_dim = data_dict[sheet]['size'][0]
+        pad = np.zeros((max_dim - sheet_dim, data_dict[sheet]['size'][1]))
+        
+        data_dict[sheet]['values'] = np.vstack((data_dict[sheet]['values'], pad))
+
+    return max_dim
+
 def unique_data_labels(data_dict: dict):
     list_of_lists = [data_dict[sheet]['labels'] for sheet in data_dict.keys()]
     list_of_labels = []
@@ -31,18 +50,15 @@ def nclass(data_dict: dict):
 
 def arrange_data(data_dict: dict):
     unique_labels = unique_data_labels(data_dict)
-    data_dims = [data_dict[sheet]['size'][0] for sheet in data_dict.keys()]
+    data_dim = conform_data(data_dict)
     
-    if len(set(data_dims)) != 1:
-        raise Exception("inconsistent data dimensions")
-    else:
-        label_data_dict = {}
-        for label in unique_labels:
-            label_data = np.array([], dtype = np.float64).reshape(data_dims[0], 0)
-            for sheet in data_dict.keys():
-                data_index = [l == label for l in data_dict[sheet]['labels']]
-                np.hstack([label_data, data_dict[sheet]['values'][:, data_index]])
+    labeled_data_dict = {}
+    for label in unique_labels:
+        label_data = np.array([], dtype = np.float64).reshape(data_dim, 0)
+        for sheet in data_dict.keys():
+            data_index = [l == label for l in data_dict[sheet]['labels']]
+            np.hstack([label_data, data_dict[sheet]['values'][:, data_index]])
             
-            label_data_dict[label] = input_clean.clean_data(label_data)
+            labeled_data_dict[label] = input_clean.clean_data(label_data)
 
-    return label_data_dict
+    return labeled_data_dict
