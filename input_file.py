@@ -36,7 +36,8 @@ def read_sheet(f: dict, sheet: str, header: bool = True):
 
 def read_data(file_path: str, header: bool = True, sheets: List[str] = []):
     f = pd.read_excel(file_path, None)
-    sheet_names_from_file = str(set(f.keys()))
+    sheet_names_from_file = [str(key) for key in f.keys()]
+    
     
     data_dict = {}
     

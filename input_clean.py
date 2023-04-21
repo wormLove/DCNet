@@ -15,10 +15,9 @@ def remove_zero_cols(data: np.ndarray):
 def remove_nans(data: np.ndarray):
     data[np.isnan(data)] = 0
 
-def clean_data(label_data):
-    remove_nans(label_data)
-    data_p = remove_zero_cols(label_data)
-    data_p = set_data_range(data_p)
-    remove_nans(data_p)
-    
-    return data_p
+def clean_data(labeled_data_dict: dict):
+    for label, data in labeled_data_dict.items():
+        remove_nans(data)
+        labeled_data_dict[label] = remove_zero_cols(data)
+        labeled_data_dict[label] = set_data_range(labeled_data_dict[label])
+        remove_nans(labeled_data_dict[label])
