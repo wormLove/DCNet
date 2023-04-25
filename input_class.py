@@ -6,6 +6,7 @@ import random
 import input_props, input_file
 
 class InputObj:
+    '''Create a class for input data and define functions to perform'''
     def __init__(self, nclass, nsamples, train_data_dict, test_data_dict):
         self._nclass = nclass
         self._nsamples = nsamples
@@ -14,7 +15,10 @@ class InputObj:
 
 
 def get_input_object(file_path: str, header: bool = True, sheets: List[str] = []):
-    data_dict = input_file.read_data(file_path, header = header, sheets = sheets)
-    number_of_classes, number_of_samples, train_data_dict, test_data_dict = input_props.organize_data(data_dict)
+    '''Function to create input object'''
     
-    return InputObj(number_of_classes, number_of_samples, train_data_dict, test_data_dict)
+    # get data dictionary from the csv/excel file
+    data_dict = input_file.read_data(file_path, header = header, sheets = sheets)
+    
+    # organize and save the data into a db file
+    input_props.organize_data(data_dict)
