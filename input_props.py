@@ -130,6 +130,8 @@ def unique_data_labels(data_dict: dict):
     
     # get unique class labels using set
     unique_labels = set(list_of_labels)
+    
+    # return unique labels
     return unique_labels
 
 
