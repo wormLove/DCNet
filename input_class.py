@@ -48,9 +48,10 @@ class Data:
         data_dir = os.path.join(os.getcwd(), "Data")
         filename = "Data-" + fid
         file_path = os.path.join(data_dir, filename)
+        print(file_path)
         
         # if path to file is present return it, else raise exception
-        if os.path.isfile(file_path):
+        if os.path.isfile(file_path + ".db"):
             return file_path
         else:
             raise Exception("file with fid not found in current directory") 
@@ -109,20 +110,16 @@ class Train(Data):
         # create a list of class indices and shuffle it
         class_index_list = list(range(number_of_classes))
         random.shuffle(class_index_list)
-        
         # loop through all class indices
         for class_index in class_index_list:
             # select the class label corresponding to the class index and obtain its data
             label = self.class_names[class_index_list[class_index]]
             label_data = self.data[label]
             
-            # choose a random start point in the data
+            # choose a random start point in the data and stack slice of data
             sample_index_start = random.randint(0, label_data.shape[1] - class_samples_in_batch)
-            
-            # put samples of the class data in training batch
-            for sample_index in range(class_samples_in_batch):
-                self.training_batch = np.hstack((self.training_batch, label_data[:, sample_index_start+sample_index]))
-
+            label_data_to_stack = label_data[:, sample_index_start:sample_index_start+class_samples_in_batch]
+            self.training_batch = np.hstack((self.training_batch, label_data_to_stack))
 
 class Test(Data):
     '''Create class for test data'''
@@ -151,14 +148,3 @@ class Test(Data):
     def initialize_test_procedure(self):
         for _, data in self.data.items():
             self.test_batch = np.hstack((self.test_batch, data))
-
-
-
-def get_input_object(file_path: str, header: bool = True, sheets: List[str] = []):
-    '''Function to create input object'''
-    
-    # get data dictionary from the csv/excel file
-    data_dict = input_file.read_data(file_path, header = header, sheets = sheets)
-    
-    # organize and save the data into a db file
-    input_props.organize_data(data_dict)

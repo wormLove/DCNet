@@ -7,20 +7,12 @@ import input_clean, input_save
 def training_data_props(train_data_dict: dict):
     '''Function to get class names, and minimum class size from training data dictionary'''
     
-    # initialize property values
-    min_number_of_samples = 0
-    
     # names of classes are the keys in the training data dictionary
     class_names = list(train_data_dict.keys())
     
-    # loop through all classes in the training data dictionary and update property values
-    for label in train_data_dict:
-        data = train_data_dict[label]
-        data_size = data.shape[1]
-        
-        # check for minimum class size
-        if min_number_of_samples < data_size:
-            min_number_of_samples = data_size
+    # obtain all sample sizes and find minimum
+    sample_sizes = [data.shape[1] for _, data in train_data_dict.items()]
+    min_number_of_samples = min(sample_sizes)
     
     # return property values
     return class_names, min_number_of_samples
@@ -153,13 +145,13 @@ def organize_data(data_dict: dict):
     
     #get data dictionaries and clean data in them
     train_data_dict, test_data_dict = get_data_dicts(data_dict, unique_labels, data_dim, test_sheets)
-    input_clean.clean_data(train_data_dict)
-    input_clean.clean_data(test_data_dict)
+    train_data_dict_clean = input_clean.clean_data(train_data_dict)
+    test_data_dict_clean = input_clean.clean_data(test_data_dict)
     
     # get number of samples, number_of_classes, and size of each class in the training dictionary
-    class_names, min_number_of_samples = training_data_props(train_data_dict)
+    class_names, min_number_of_samples = training_data_props(train_data_dict_clean)
     
     # save collected values in db file
-    input_save.save_organized_data(class_names, data_dim, min_number_of_samples, train_data_dict, test_data_dict)
+    input_save.save_organized_data(class_names, data_dim, min_number_of_samples, train_data_dict_clean, test_data_dict_clean)
 
 

@@ -3,12 +3,20 @@ import numpy as np
 def remove_empty_keys(labeled_data_dict: dict):
     '''Function to remove labels without any data'''
     
+    # create an empty dictionary to store good labels
+    labeled_data_dict_clean = {}
+    
     # loop through all labels and corresponding data
     for label, data in labeled_data_dict.items():
         
-        # if data shape is 0, remove the label data pair
+        # if data shape is 0, dont copy label data pair
         if data.shape[1] == 0:
-            labeled_data_dict.pop(label, None)
+            continue
+        else:
+            labeled_data_dict_clean[label] = data
+    
+    # return clean dictionary
+    return labeled_data_dict_clean
 
 def set_data_range(data: np.ndarray):
     '''Function to set data range between 0 and 1'''
@@ -36,5 +44,6 @@ def clean_data(labeled_data_dict: dict):
         labeled_data_dict[label] = set_data_range(labeled_data_dict[label])
         remove_nans(labeled_data_dict[label])
     
-    # remove any labels that do not hold any data
-    remove_empty_keys(labeled_data_dict)
+    # remove any labels that do not hold any data and return clean dictionary
+    labeled_data_dict_clean = remove_empty_keys(labeled_data_dict)
+    return labeled_data_dict_clean
