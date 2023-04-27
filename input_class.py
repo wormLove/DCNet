@@ -48,7 +48,6 @@ class Data:
         data_dir = os.path.join(os.getcwd(), "Data")
         filename = "Data-" + fid
         file_path = os.path.join(data_dir, filename)
-        print(file_path)
         
         # if path to file is present return it, else raise exception
         if os.path.isfile(file_path + ".db"):
@@ -67,6 +66,7 @@ class Train(Data):
         self.data = {}
         self.max_batch_size = 0
         self.training_batch = np.array([], dtype = np.float64).reshape(self.data_dim, 0)
+        self.train_sample_return_index = 0
         
         # call parent load_data function to load data
         self.load_data(fid, data_type = 'train')
@@ -77,10 +77,11 @@ class Train(Data):
     
     # define the next function
     def __next__(self):
-        k = 0
-        if k < self.training_batch.shape[1]:
-            k += 1
-            return self.training_batch[:, k-1]   
+        if self.train_sample_return_index < self.training_batch.shape[1]:
+            self.train_sample_return_index += 1
+            return self.training_batch[:, self.train_sample_return_index-1].reshape(self.data_dim, 1)
+        else:
+            raise StopIteration   
     
     # define a function to adjust batch size according to data
     def get_class_samples_in_batch(self, number_of_classes: int, batch_size: int):
@@ -110,6 +111,7 @@ class Train(Data):
         # create a list of class indices and shuffle it
         class_index_list = list(range(number_of_classes))
         random.shuffle(class_index_list)
+        
         # loop through all class indices
         for class_index in class_index_list:
             # select the class label corresponding to the class index and obtain its data
@@ -120,6 +122,9 @@ class Train(Data):
             sample_index_start = random.randint(0, label_data.shape[1] - class_samples_in_batch)
             label_data_to_stack = label_data[:, sample_index_start:sample_index_start+class_samples_in_batch]
             self.training_batch = np.hstack((self.training_batch, label_data_to_stack))
+            
+            # reset the train sample return index to 0
+            self.train_sample_return_index = 0
 
 class Test(Data):
     '''Create class for test data'''
@@ -127,8 +132,10 @@ class Test(Data):
     # define constructor for Test object
     def __init__(self, fid: str):
         # initialize local data variable
+        super().__init__(fid)
         self.data = {}
         self.test_batch = np.array([], dtype = np.float64).reshape(self.data_dim, 0)
+        self.test_sample_return_index = 0
         
         # call parent load_data function to load data
         self.load_data(fid, data_type = 'test')
@@ -139,10 +146,11 @@ class Test(Data):
     
     # define next function for test object
     def __next__(self):
-        k = 0
-        if k < self.test_batch.shape[1]:
-            k += 1
-            return self.test_batch[:, k-1] 
+        if  self.test_sample_return_index < self.test_batch.shape[1]:
+            self.test_sample_return_index += 1
+            return self.test_batch[:,  self.test_sample_return_index-1]
+        else:
+            raise StopIteration 
     
     # define a function to form test batch and initialize test procedure
     def initialize_test_procedure(self):

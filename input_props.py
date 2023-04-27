@@ -151,7 +151,8 @@ def organize_data(data_dict: dict):
     # get number of samples, number_of_classes, and size of each class in the training dictionary
     class_names, min_number_of_samples = training_data_props(train_data_dict_clean)
     
-    # save collected values in db file
-    input_save.save_organized_data(class_names, data_dim, min_number_of_samples, train_data_dict_clean, test_data_dict_clean)
+    # save collected values in db file and return its id
+    fid = input_save.save_organized_data(class_names, data_dim, min_number_of_samples, train_data_dict_clean, test_data_dict_clean)
+    return fid
 
 

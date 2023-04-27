@@ -22,7 +22,8 @@ def save_organized_data(class_names: List[str], data_dim: int, min_number_of_sam
         os.mkdir(data_dir)
     
     # cerate a file name and file path
-    filename = "Data" + date_stamp()
+    fid = date_stamp()
+    filename = "Data" + fid
     file_path = os.path.join(data_dir, filename)
     
     # create a data file with created filename at filepath
@@ -33,3 +34,6 @@ def save_organized_data(class_names: List[str], data_dim: int, min_number_of_sam
     f['train_dict'] = train_data_dict
     f['test_dict'] = test_data_dict
     f.close()
+    
+    # return fid
+    return fid
