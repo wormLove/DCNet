@@ -4,18 +4,26 @@ import math
 
 import input_clean, input_save
 
-def nsamples(data_dict: dict):
-    '''Function to get total number of data points'''
-    nsamples = 0
-    for sheet in data_dict.keys():
-        nsamples += data_dict[sheet]['size'][1]
-    return nsamples
-
-
-def nclass(data_dict: dict):
-    '''Function to get number of classes or labels in data'''
-    unique_labels = unique_data_labels(data_dict)
-    return len(unique_labels)
+def training_data_props(train_data_dict: dict):
+    '''Function to get class names, and minimum class size from training data dictionary'''
+    
+    # initialize property values
+    min_number_of_samples = 0
+    
+    # names of classes are the keys in the training data dictionary
+    class_names = list(train_data_dict.keys())
+    
+    # loop through all classes in the training data dictionary and update property values
+    for label in train_data_dict:
+        data = train_data_dict[label]
+        data_size = data.shape[1]
+        
+        # check for minimum class size
+        if min_number_of_samples < data_size:
+            min_number_of_samples = data_size
+    
+    # return property values
+    return class_names, min_number_of_samples
 
 
 def partition_dict(labeled_data_dict: dict, fraction: float):
@@ -148,11 +156,10 @@ def organize_data(data_dict: dict):
     input_clean.clean_data(train_data_dict)
     input_clean.clean_data(test_data_dict)
     
-    # get number of samles and classes
-    number_of_samples = nsamples(data_dict)
-    number_of_classes = nclass(data_dict)
+    # get number of samples, number_of_classes, and size of each class in the training dictionary
+    class_names, min_number_of_samples = training_data_props(train_data_dict)
     
     # save collected values in db file
-    input_save.save_organized_data(number_of_classes, number_of_samples, unique_labels, train_data_dict, test_data_dict)
+    input_save.save_organized_data(class_names, data_dim, min_number_of_samples, train_data_dict, test_data_dict)
 
 

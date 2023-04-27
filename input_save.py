@@ -1,6 +1,7 @@
 import shelve
 import os
 from datetime import datetime
+from typing import List
 
 def date_stamp():
     '''Function to generate a date stamp'''
@@ -12,7 +13,7 @@ def date_stamp():
     #return date stamp
     return date_stamp
 
-def save_organized_data(number_of_classes: int, number_of_samples: int, unique_labels: set, train_data_dict: dict, test_data_dict: dict):
+def save_organized_data(class_names: List[str], data_dim: int, min_number_of_samples: int, train_data_dict: dict, test_data_dict: dict):
     '''Function to save the organized data'''
     
     # generate path to data directory, create if doesn't esist
@@ -26,9 +27,9 @@ def save_organized_data(number_of_classes: int, number_of_samples: int, unique_l
     
     # create a data file with created filename at filepath
     f = shelve.open(file_path)
-    f['nclass'] = number_of_classes
-    f['nsamples'] = number_of_samples
-    f['labels'] = unique_labels
+    f['class_names'] = class_names
+    f['data_dim'] = data_dim
+    f['max_batch_size'] = min_number_of_samples*len(class_names)
     f['train_dict'] = train_data_dict
     f['test_dict'] = test_data_dict
     f.close()
