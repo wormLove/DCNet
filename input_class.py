@@ -101,7 +101,7 @@ class Train(Data):
         return class_samples_in_batch
     
     # define a function to form training batch and initialize training procedure
-    def initialize_training_procedure(self, batch_size: int):
+    def initialize_batch(self, batch_size: int):
         # get number of classes and initialize a training batch array
         number_of_classes = len(self.class_names)
         
@@ -153,6 +153,6 @@ class Test(Data):
             raise StopIteration 
     
     # define a function to form test batch and initialize test procedure
-    def initialize_test_procedure(self):
+    def initialize_batch(self):
         for _, data in self.data.items():
             self.test_batch = np.hstack((self.test_batch, data))
