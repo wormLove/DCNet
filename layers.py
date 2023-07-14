@@ -124,17 +124,18 @@ class DiscriminationModule(nn.Module):
 
 
 class ClassificationModule(nn.Module):
-    def __init__(self, weights: torch.Tensor, alpha: float=1.0):
+    def __init__(self, weights: torch.Tensor, alpha: float=1.0, penalty: float=1.0):
         super().__init__()
-        self.feedforward = Feedforward(weights)
-        self.recurrent = Feedforward(torch.eye(weights.shape[1]))
+        self.feedforward1 = Feedforward(weights)
+        self.feedforward2 = Feedforward(torch.eye(weights.shape[1]))
         self.potential = torch.zeros(weights.shape[1], weights.shape[1])
         self.activation = LayerThresholding(alpha=alpha)
+        self.penalty = penalty
 
     def forward(self, input: torch.Tensor):
         assert input.dim() == 2 and input.shape[0] == 1, "input must be a row vector"
-        out_ = self.feedforward(input)
-        out_ = self.recurrent(out_)
+        out_ = self.feedforward1(input)
+        out_ = self.feedforward2(out_)
         out_f = self.activation(out_)
         self.update(out_f)
         return out_f
@@ -147,15 +148,15 @@ class ClassificationModule(nn.Module):
     def update(self, out_f: torch.Tensor):
         out_f_transformed = self.transform(out_f)
         update_matrix = torch.floor(torch.mm(out_f_transformed.T, out_f_transformed))
-        #update_matrix = (update_matrix >= 0)*update_matrix + 0.5*(update_matrix < 0)*update_matrix
+        update_matrix = (update_matrix >= 0)*update_matrix + self.penalty*(update_matrix < 0)*update_matrix
         self.potential += update_matrix
     
     def organize(self):
-        recurrent_weights = (self.potential > 0).float()
-        self.recurrent.update(recurrent_weights, unit_norm=False)
+        excitatory_weights = (self.potential > 0).float()
+        self.feedforward2.update(excitatory_weights, unit_norm=False)
         self.potential[:,:] = 0.0
 
     def connections(self):
-        return torch.clone(self.recurrent.weights)
+        return torch.clone(self.feedforward2.weights)
     
     
