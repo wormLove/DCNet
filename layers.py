@@ -124,7 +124,7 @@ class DiscriminationModule(nn.Module):
 
 
 class ClassificationModule(nn.Module):
-    def __init__(self, weights: torch.Tensor, alpha: float=1.0, penalty: float=1.0):
+    def __init__(self, weights: torch.Tensor, alpha: float=1.0, penalty: float=1.0): 
         super().__init__()
         self.feedforward1 = Feedforward(weights)
         self.feedforward2 = Feedforward(torch.eye(weights.shape[1]))
@@ -141,7 +141,7 @@ class ClassificationModule(nn.Module):
         return out_f
     
     def transform(self, out_f: torch.Tensor):
-        out_f_transformed = -0.5*torch.ones(out_f.shape)
+        out_f_transformed = -0.5*torch.ones_like(out_f)
         out_f_transformed[out_f > 0] = 1.0
         return out_f_transformed
     
@@ -153,8 +153,9 @@ class ClassificationModule(nn.Module):
     
     def organize(self):
         excitatory_weights = (self.potential > 0).float()
+        #excitatory_weights = self.potential.clone()
         self.feedforward2.update(excitatory_weights, unit_norm=False)
-        self.potential[:,:] = 0.0
+        self.potential.fill_(0.0)
 
     def connections(self):
         return torch.clone(self.feedforward2.weights)
