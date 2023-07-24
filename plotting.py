@@ -90,7 +90,8 @@ def plot_nodes(ax, graph, label_indices, connected_indices, graph_coord_dict):
                 else:
                     coord_x = torch.tensor([graph_coord_dict[idx1.item()][0], graph_coord_dict[idx2.item()][0]])
                     coord_y = torch.tensor([graph_coord_dict[idx1.item()][1], graph_coord_dict[idx2.item()][1]])
-                    connect_nodes(ax, coord_x, coord_y, c)
+                    #connect_nodes(ax, coord_x, coord_y, c)
+                    ax.plot(ax, coord_x, coord_y, color=c)
                     plotted.append(idx1)
                     plotted.append(idx2)
         cidx += 1
