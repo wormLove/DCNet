@@ -66,7 +66,7 @@ class Recurrent(nn.Module):
 
 
 class DiscriminationModule(nn.Module):
-    def __init__(self, weights: torch.Tensor, lr: float=0.99, lr_decay: float=0.8, beta: float=0.99, alpha: float=1.0):
+    def __init__(self, weights: torch.Tensor, lr: float=0.99, lr_decay: float=0.8, beta: float=0.99, alpha: float=1.0, label_start_idx: int=0):
         super().__init__()
         self.feedforward = Feedforward(weights)
         self.recurrent = Recurrent(self.recurrent_weights())
@@ -78,15 +78,25 @@ class DiscriminationModule(nn.Module):
         self.velocity_anti_hebb = torch.zeros(weights.shape[1], weights.shape[1])
         self.dropout = torch.zeros(1, weights.shape[1]).bool()
         self.counter = 1
+        self.label_start_idx = label_start_idx
         
 
     def forward(self, input: torch.Tensor):
         assert input.dim() == 2 and input.shape[0] == 1, "input must be a row vector"
-        out_ = self.feedforward(input)
+        inp = self.mask(input) if self.label_start_idx != 0 else input
+        out_ = self.feedforward(inp)
         out_ = self.recurrent(out_)
         out_f = self.activation(out_)
         self.update(input, out_f)
         return out_f
+    
+    def mask(self, input: torch.Tensor):
+        masked_input = input.clone()
+        masked_input[self.label_start_idx:] = 0.0
+        return masked_input
+    
+    def labels(self):
+        return torch.argmax(self.feedforward.weights[self.label_start_idx:,:], dim=0)
 
     def recurrent_weights(self): 
         return torch.mm(self.feedforward.weights.T, self.feedforward.weights)
