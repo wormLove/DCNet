@@ -25,6 +25,7 @@ class Loader:
             return torch.cat((sample.reshape(1, -1), pad), dim=1)
         raise StopIteration
 
+
 class Initializer:
     """Class to initialize dataset specicfic initial connection and a data loader
     """
