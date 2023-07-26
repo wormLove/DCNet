@@ -2,7 +2,6 @@ import torch
 import numpy as np
 from matplotlib import pyplot as plt
 import matplotlib.pylab as pl
-from tqdm import tqdm
 
 
 def auto_reshape(n: int):
@@ -67,7 +66,7 @@ def coordinates(n: int):
     y = torch.sin(theta)
     return x, y
 
-def plot_nodes(ax, graph, label_indices, connected_indices, graph_coord_dict):
+def plot_nodes(ax, graph, label_indices, connected_indices, graph_coord_dict, curved: bool):
     """Function to plot line between nodes of the network graph
         Args:
             ax: pyplot axis object on which nodes are plotted
@@ -90,8 +89,7 @@ def plot_nodes(ax, graph, label_indices, connected_indices, graph_coord_dict):
                 else:
                     coord_x = torch.tensor([graph_coord_dict[idx1.item()][0], graph_coord_dict[idx2.item()][0]])
                     coord_y = torch.tensor([graph_coord_dict[idx1.item()][1], graph_coord_dict[idx2.item()][1]])
-                    #connect_nodes(ax, coord_x, coord_y, c)
-                    ax.plot(ax, coord_x, coord_y, color=c)
+                    connect_nodes(ax, coord_x, coord_y, c) if curved else ax.plot(coord_x.tolist(), coord_y.tolist(), color=c)
                     plotted.append(idx1)
                     plotted.append(idx2)
         cidx += 1
@@ -134,7 +132,7 @@ def plot_labels(fig, ax, x_off, y_off, graph_coord_dict, wf):
         imax.pcolormesh(wf[:,idx].reshape(nrows, ncols))
         imax.axis('off')
 
-def plot_clusters(wc: torch.Tensor, wd: torch.Tensor, atom_labels: torch.Tensor):
+def plot_clusters(wc: torch.Tensor, wd: torch.Tensor, atom_labels: torch.Tensor, curved: bool=False):
     """Function to plat custers of varying dgrees in form of a connected graph
         Args:
             module_c: A ClassificationModule object
@@ -162,7 +160,7 @@ def plot_clusters(wc: torch.Tensor, wd: torch.Tensor, atom_labels: torch.Tensor)
                 y_off = 0.01 + 0.2*i
                 ax = fig.add_axes([x_off, y_off, 0.19, 0.19])
 
-                plot_nodes(ax, wc, label_cluster, connected_cluster, graph_coord_dict) 
+                plot_nodes(ax, wc, label_cluster, connected_cluster, graph_coord_dict, curved) 
                 plot_labels(fig, ax, x_off, y_off, graph_coord_dict, wd)
                 ax.set_title(f"{label=},{nAtoms=}")
                 ax.axis('off')
