@@ -186,13 +186,12 @@ class DiscriminationModule(nn.Module):
 class ClassificationModule(nn.Module):
     """Classification module comprising of two linear layers and a layer thresholding activation
     """
-    def __init__(self, weights: torch.Tensor, alpha: float=1.0, penalty: float=1.0): 
+    def __init__(self, weights: torch.Tensor, alpha: float=1.0): 
         super().__init__()
         self.feedforward1 = Feedforward(weights)
         self.feedforward2 = Feedforward(torch.eye(weights.shape[1]))
         self.potential = torch.zeros(weights.shape[1], weights.shape[1])
         self.activation = LayerThresholding(alpha=alpha)
-        self.penalty = penalty
     
     def forward(self, input: torch.Tensor):
         assert input.dim() == 2 and input.shape[0] == 1, "input must be a row vector"
@@ -222,7 +221,6 @@ class ClassificationModule(nn.Module):
         """
         out_f_transformed = self.transform(out_f)
         update_matrix = torch.floor(torch.mm(out_f_transformed.T, out_f_transformed))
-        update_matrix = (update_matrix >= 0)*update_matrix + self.penalty*(update_matrix < 0)*update_matrix
         self.potential += update_matrix
     
     def organize(self):
