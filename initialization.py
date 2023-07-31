@@ -34,26 +34,33 @@ class Initializer:
         self.num_classes = num_classes
         self.pad_labels = pad_labels
     
-    def weights(self, out_dim: int, split: int):
+    def weights(self, out_dim: int, split: float=0.25, in_dim: int=0, type: str=''):
         """Function to obtain the initial connectivity tensor for the given dataset
             Args:
                 out_dim: An integer specifying the dimesion of the network output
                 split: An integer specifying the sample data size for initializing connections 
             Return:
-                A normalized tensor of initial connectivity
+                A tensor of initial connectivity
         """
-        # get sample data
-        sample_data = self._sample_data(split, self.pad_labels)
-        
-        # perform svd to get prinicpal axes
-        U, S, V = torch.pca_lowrank(sample_data, q=sample_data.shape[1], center=True)
-        Sn, n = self._effective_dims(S)
-        Sn_inv = torch.diag(Sn[:n]**(-1))
-        
-        # randomize the prinicpal axes
-        randomizer = self._randomizer(out_dim, n)
-        init_connections = multi_dot((V[:,:n], Sn_inv, randomizer.T))
-        return normalize(init_connections, p=2, dim=0)
+        if type == 'random':
+            connections = torch.randn(self.in_dim, out_dim) if in_dim == 0 else torch.randn(in_dim, out_dim)
+        elif type == 'identity':
+            connections = torch.eye(out_dim)
+        else:
+            # get sample data
+            batch_size = int(split*len(self.dataset)) # type: ignore
+            sample_data = self._sample_data(batch_size, self.pad_labels)
+            
+            # perform svd to get prinicpal axes
+            U, S, V = torch.pca_lowrank(sample_data, q=sample_data.shape[1], center=True)
+            Sn, n = self._effective_dims(S)
+            Sn_inv = torch.diag(Sn[:n]**(-1))
+            
+            # randomize the prinicpal axes
+            randomizer = self._randomizer(out_dim, n)
+            connections = multi_dot((V[:,:n], Sn_inv, randomizer.T))
+
+        return connections
     
     def loader(self, nsamples: int):
         """Function to generate a data loader which returns flattened examples with optional padded one-hot labels in batch size 1 
@@ -65,7 +72,7 @@ class Initializer:
         loader = DataLoader(self.dataset, sampler=RandomSampler(self.dataset)) # type: ignore
         return Loader(loader, nsamples, self.num_classes, self.pad_labels)
     
-    def _sample_data(self, split: int, pad_labels: bool):
+    def _sample_data(self, batch_size: int, pad_labels: bool):
         """Function to return sample data with optional padded one-hot labels
             Args:
                 split: An integer specifying the sample data size
@@ -73,12 +80,18 @@ class Initializer:
             Return:
                 Sample data tensor
         """
-        loader = DataLoader(self.dataset, sampler=RandomSampler(self.dataset), batch_size=split) # type: ignore
+        loader = DataLoader(self.dataset, sampler=RandomSampler(self.dataset), batch_size=batch_size) # type: ignore
         samples, targets = next(iter(loader))
-        pad = F.one_hot(targets, num_classes=self.num_classes) if pad_labels else torch.zeros(split, self.num_classes)
-        return torch.cat((samples.reshape(split, -1), pad), dim=1)
+        pad = F.one_hot(targets, num_classes=self.num_classes) if pad_labels else torch.zeros(batch_size, self.num_classes)
+        return torch.cat((samples.reshape(batch_size, -1), pad), dim=1)
     
-    def _randomizer(self, m: int, n: int):
+    @property
+    def in_dim(self):
+        sample, _ = next(iter(self.dataset))
+        return len(sample.flatten())+self.num_classes
+    
+    @staticmethod
+    def _randomizer(m: int, n: int):
             """Function to generate a near-orthogonal tensor to randomize connections
                 Args:
                     m: an integer specifying the output dimensions
@@ -96,7 +109,8 @@ class Initializer:
             else:
                 return V
     
-    def _effective_dims(self, S: torch.Tensor):
+    @staticmethod
+    def _effective_dims(S: torch.Tensor):
         """Function to calculate the effective dimensionality of the sample data
             Args:
                 S: A vector of singular values
@@ -111,4 +125,3 @@ class Initializer:
                 n = i+1
                 break
         return Sn, n
-

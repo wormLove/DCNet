@@ -14,13 +14,13 @@ class Conncetedness(Metric):
         assert graph.dim() == 2 and labels.dim() == 1
         assert graph.shape[0] == graph.shape[1] == len(labels)
         
-        graph.fill_diagonal_(0.0)
+        #graph.fill_diagonal_(0.0)
         for idx, row in enumerate(graph):
             row_label = labels[idx]
             connected_labels = labels[row.nonzero().squeeze()]
             self.correct += torch.sum(row_label == connected_labels).item()
             self.total += connected_labels.numel()
-        self.degree = 0.5*self.total/len(labels)
+        #self.degree = 0.5*self.total/len(labels)
     
     def compute(self):
         return self.correct/self.total

@@ -3,6 +3,9 @@ from torch import nn
 from torch.linalg import matrix_rank, multi_dot
 from torch.nn.functional import normalize
 
+from initialization import Initializer
+from learning import Organizer
+
 class LayerThresholding(nn.Module):
     """Custom activation function based on the layer response
     """
@@ -98,27 +101,32 @@ class Recurrent(nn.Module):
 class DiscriminationModule(nn.Module):
     """Discrimination module comprising of a linear layer, a recurrent layer and a layer thresholding activation
     """
-    def __init__(self, weights: torch.Tensor, lr: float=0.99, lr_decay: float=0.8, beta: float=0.99, alpha: float=1.0, label_start_idx: int=0):
+    #def __init__(self, weights: torch.Tensor, lr: float=0.99, lr_decay: float=0.8, beta: float=0.99, alpha: float=1.0, label_start_idx: int=0):
+    def __init__(self, out_dim: int, initializer: Initializer, type: str='', lr: float=0.99, lr_decay: float=0.8, beta: float=0.99, alpha: float=1.0):
         super().__init__()
-        self.feedforward = Feedforward(weights)
-        self.recurrent = Recurrent(self.recurrent_weights())
+        self.feedforward = Feedforward(initializer.weights(out_dim, type=type))
+        self.recurrent = Recurrent(self.recurrent_weights)
         self.activation = LayerThresholding(alpha=alpha)
-        self.lr = lr
-        self.lr_decay = lr_decay
-        self.beta = beta
-        self.velocity_hebb = torch.zeros(weights.shape[0], weights.shape[1])
-        self.velocity_anti_hebb = torch.zeros(weights.shape[1], weights.shape[1])
-        self.dropout = torch.zeros(1, weights.shape[1]).bool()
-        self.counter = 1
-        self.label_start_idx = label_start_idx
+        self.organizer = Organizer(out_dim, initializer.in_dim, lr=lr, lr_decay=lr_decay, beta1=beta, beta2=1-beta)
+        self.pad_labels = initializer.pad_labels
+        self.label_idx = initializer.in_dim - initializer.num_classes
+        #self.lr = lr
+        #self.lr_decay = lr_decay
+        #self.beta = beta
+        #self.velocity_hebb = torch.zeros(weights.shape[0], weights.shape[1])
+        #self.velocity_anti_hebb = torch.zeros(weights.shape[1], weights.shape[1])
+        #self.dropout = torch.zeros(1, weights.shape[1]).bool()
+        #self.counter = 1
+        #self.label_start_idx = label_start_idx
     
     def forward(self, input: torch.Tensor):
         assert input.dim() == 2 and input.shape[0] == 1, "input must be a row vector"
-        inp = self.mask(input) if self.label_start_idx != 0 else input
+        inp = self.mask(input) if self.pad_labels else input
         out_ = self.feedforward(inp)
         out_ = self.recurrent(out_)
         out_f = self.activation(out_)
-        self.update(input, out_f)
+        #self.update(input, out_f)
+        self.organizer.update(out_f, input, normalized=True, use_dropout=True)
         return out_f
     
     def mask(self, input: torch.Tensor):
@@ -129,108 +137,121 @@ class DiscriminationModule(nn.Module):
                 masked_input: A clone of the input where label has been masked
         """
         masked_input = input.clone()
-        masked_input[self.label_start_idx:] = 0.0
+        masked_input[self.label_idx:] = 0.0
         return masked_input
     
+    @property
     def labels(self):
         """A function to predict the label for each unit's tuning property
         """
-        return torch.argmax(self.feedforward.weights[self.label_start_idx:,:], dim=0)
+        return torch.argmax(self.connections[self.label_idx:,:], dim=0)
     
+    @property
     def recurrent_weights(self):
         """A function to calculate the recurrent weights based on the feedforward weights
         """ 
-        return torch.mm(self.feedforward.weights.T, self.feedforward.weights)
+        return torch.mm(self.connections.T, self.connections)
     
-    def update(self, input: torch.Tensor, out_f: torch.Tensor):
-        """Function to calculate and update the connection potentials
-            Args: 
-                input: The 1D input tensor
-                out_f: The corresponding output tensor
-            Return:
-                Nothing
-        """
-        # droput the previously active cells
-        out_filtered = torch.logical_not(self.dropout)*out_f
-        norm_out_filtered = torch.norm(out_filtered, p='fro').item()
-        
-        # update potentials if response is non-zero
-        if norm_out_filtered:
-            self.velocity_hebb = self.beta*self.velocity_hebb + (1-self.beta)*torch.mm(input.T, out_filtered)/norm_out_filtered
-            self.velocity_anti_hebb = self.beta*self.velocity_anti_hebb + (1-self.beta)*torch.mm(out_filtered.T, out_filtered)/norm_out_filtered**2
-        
-        # update droputs to be the active cells
-        self.dropout = out_f > 0
+    #def update(self, input: torch.Tensor, out_f: torch.Tensor):
+    #    """Function to calculate and update the connection potentials
+    #       Args: 
+    #            input: The 1D input tensor
+    #            out_f: The corresponding output tensor
+    #        Return:
+    #            Nothing
+    #    """
+    #    # droput the previously active cells
+    #    out_filtered = torch.logical_not(self.dropout)*out_f
+    #    norm_out_filtered = torch.norm(out_filtered, p='fro').item()
+    #    
+    #    # update potentials if response is non-zero
+    #    if norm_out_filtered:
+    #        self.velocity_hebb = self.beta*self.velocity_hebb + (1-self.beta)*torch.mm(input.T, out_filtered)/norm_out_filtered
+    #        self.velocity_anti_hebb = self.beta*self.velocity_anti_hebb + (1-self.beta)*torch.mm(out_filtered.T, out_filtered)/norm_out_filtered**2
+    #    
+    #    # update droputs to be the active cells
+    #   self.dropout = out_f > 0
     
     def organize(self):
         """Function to form connections between input and output layer units 
         """
-        # calculate the updated weights
-        correction_factor = 1/(1 - self.beta**self.counter)
-        updated_weights = (1 - self.lr)*self.feedforward.weights + correction_factor*self.lr*(self.velocity_hebb - torch.mm(self.feedforward.weights, self.velocity_anti_hebb))
-        
-        # update weights in feedforward and recurrent connections 
+    #    # calculate the updated weights
+    #    correction_factor = 1/(1 - self.beta**self.counter)
+    #    updated_weights = (1 - self.lr)*self.feedforward.weights + correction_factor*self.lr*(self.velocity_hebb - torch.mm(self.feedforward.weights, self.velocity_anti_hebb))
+    #    
+    #    # update weights in feedforward and recurrent connections 
+    #    self.feedforward.update(updated_weights)
+    #    self.recurrent.update(self.recurrent_weights)
+    #    
+    #    # update learning rate and organization counter
+    #    self.counter += 1
+    #    self.lr = self.lr_decay*self.lr
+        updated_weights = self.organizer.organize(self.connections)
         self.feedforward.update(updated_weights)
-        self.recurrent.update(self.recurrent_weights())
-        
-        # update learning rate and organization counter
-        self.counter += 1
-        self.lr = self.lr_decay*self.lr
+        self.recurrent.update(self.recurrent_weights)
     
+    @property
     def connections(self):
         """Function to get the weights of the feedforward layer
         """
-        return torch.clone(self.feedforward.weights)
+        #return torch.clone(self.feedforward.weights)
+        return self.feedforward.weights
 
 
 class ClassificationModule(nn.Module):
     """Classification module comprising of two linear layers and a layer thresholding activation
     """
-    def __init__(self, weights: torch.Tensor, alpha: float=1.0): 
+    #def __init__(self, weights: torch.Tensor, alpha: float=1.0):
+    def __init__(self, out_dim: int, initializer: Initializer, type: str='identity', beta: float=1.0, alpha: float=1.0):
         super().__init__()
-        self.feedforward1 = Feedforward(weights)
-        self.feedforward2 = Feedforward(torch.eye(weights.shape[1]))
-        self.potential = torch.zeros(weights.shape[1], weights.shape[1])
+        self.feedforward1 = Feedforward(initializer.weights(out_dim, type=type))
+        self.feedforward2 = Feedforward(torch.eye(out_dim))
+        #self.potential = torch.zeros(weights.shape[1], weights.shape[1])
         self.activation = LayerThresholding(alpha=alpha)
+        self.organizer = Organizer(out_dim, out_dim, beta1=beta, beta2=beta) #implement in_dim
     
     def forward(self, input: torch.Tensor):
         assert input.dim() == 2 and input.shape[0] == 1, "input must be a row vector"
         out_ = self.feedforward1(input)
         out_ = self.feedforward2(out_)
         out_f = self.activation(out_)
-        self.update(out_f)
+        #self.update(out_f)
+        self.organizer.update(out_f, use_transform=True, use_floor=True)
         return out_f
     
-    def transform(self, out_f: torch.Tensor):
-        """A function to transform the outputs so that coactive and non active connections could be identified
-            Args:
-                out_f: Output after the layer thersholding
-            Return:
-                out_f_transformed: transformed output
-        """
-        out_f_transformed = -0.5*torch.ones_like(out_f)
-        out_f_transformed[out_f > 0] = 1.0
-        return out_f_transformed
+    #def transform(self, out_f: torch.Tensor):
+    #    """A function to transform the outputs so that coactive and non active connections could be identified
+    #        Args:
+    #            out_f: Output after the layer thersholding
+    #        Return:
+    #            out_f_transformed: transformed output
+    #    """
+    #    out_f_transformed = -0.5*torch.ones_like(out_f)
+    #    out_f_transformed[out_f > 0] = 1.0
+    #    return out_f_transformed
     
-    def update(self, out_f: torch.Tensor):
-        """Function to calculate and update the connection potential among the output neurons
-            Args:
-                out_f: A 1D tensor of layer output corresponding to a single input
-            Return:
-                Nothing
-        """
-        out_f_transformed = self.transform(out_f)
-        update_matrix = torch.floor(torch.mm(out_f_transformed.T, out_f_transformed))
-        self.potential += update_matrix
+    #def update(self, out_f: torch.Tensor):
+    #    """Function to calculate and update the connection potential among the output neurons
+    #        Args:
+    #            out_f: A 1D tensor of layer output corresponding to a single input
+    #        Return:
+    #            Nothing
+    #    """
+    #    out_f_transformed = self.transform(out_f)
+    #    update_matrix = torch.floor(torch.mm(out_f_transformed.T, out_f_transformed))
+    #    self.potential += update_matrix
     
     def organize(self):
         """Function to form excitatory connections among the output neurons
         """
-        excitatory_weights = (self.potential > 0).float()
-        #excitatory_weights = self.potential.clone()
-        self.feedforward2.update(excitatory_weights, unit_norm=False)
-        self.potential.fill_(0.0)
+    #    excitatory_weights = (self.potential > 0).float()
+    #    #excitatory_weights = self.potential.clone()
+    #    self.feedforward2.update(excitatory_weights, unit_norm=False)
+    #    self.potential.fill_(0.0)
+        updated_weights = self.organizer.organize()
+        self.feedforward2.update(updated_weights, unit_norm=False)
     
+    @property
     def connections(self):
         """Function to get the connections among the output neurons
         """
