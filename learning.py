@@ -14,17 +14,18 @@ class Organizer:
             dropout: 1D boolean tensor indicating units to dropout
             counter: Total counts of the organize method
     """
-    def __init__(self, out_dim: int, in_dim: int, lr: float=0.99, lr_decay: float=0.8,  beta1: float=0.99, beta2: float=0.01):
+    def __init__(self, out_dim: int, in_dim: int, lr: float=0.99, lr_decay: float=0.8,  beta1: float=0.99, beta2: float=0.01, penalty: float=1.0):
         self.lr = lr
         self.lr_decay = lr_decay
         self.beta1 = beta1
         self.beta2 = beta2
+        self.penalty = penalty
         self.feedforward_potential = torch.zeros(in_dim, out_dim)
         self.recurrent_potential = torch.zeros(out_dim, out_dim)
         self.dropout = torch.tensor([True]*out_dim)
         self.counter = 1
         
-    def update(self, output: torch.Tensor, input: torch.Tensor=torch.tensor([]), normalized: bool=False, use_dropout: bool=False, use_transform: bool=False, use_floor: bool=False):
+    def step(self, output: torch.Tensor, input: torch.Tensor=torch.tensor([]), normalized: bool=False, use_dropout: bool=False, use_transform: bool=False, use_floor: bool=False):
         """Function to transform the layer activity and update potentials
             Args:
                 output: 1D tensor of current layer activity
@@ -40,8 +41,9 @@ class Organizer:
         output = self._normalize(output) if normalized else output
         output = self._transform(output) if use_transform else output
 
-        self.feedforward_potential = self.beta1*self.feedforward_potential + self.beta2*self._potential(output, input, use_floor=use_floor)
-        self.recurrent_potential = self.beta1*self.recurrent_potential + self.beta2*self._potential(output, use_floor=use_floor)
+        self.recurrent_potential = self.beta1*self.recurrent_potential + self.beta2*self._recurrent_potential(output, use_floor, self.penalty)
+        if input.numel() != 0:
+            self.feedforward_potential = self.beta1*self.feedforward_potential + self.beta2*self._feedforward_potential(output, input)
 
     def organize(self, weights: torch.Tensor=torch.tensor([])):
         """Function to produce updated weights based on potentials and previous weights
@@ -52,7 +54,7 @@ class Organizer:
         """
         if weights.numel() == 0:
             updated_weights = (self.recurrent_potential > 0).float()
-            self.feedforward_potential.fill_(0.0)
+            #self.feedforward_potential.fill_(0.0)
             self.recurrent_potential.fill_(0.0)
         else:
             correction_factor = 1/(1 - self.beta1**self.counter)
@@ -74,17 +76,33 @@ class Organizer:
         return output
     
     @staticmethod
-    def _potential(output: torch.Tensor, input: torch.Tensor=torch.tensor([]), use_floor: bool=False):
+    def _feedforward_potential(output: torch.Tensor, input: torch.Tensor):
         """Function to caluclate the hebbian potentials based on coactivities
             Args:
                 output: 1D tensor of current layer activity
-                input: (optional) Crresponding input tensor to the layer
-                use_floor: (optional) A boolean specifying if the potentials need to be floored to the nearest integer
+                input: Crresponding input tensor to the layer
             Return:
                 Hebbian connection potentials
         """
-        potential = torch.mm(output.T, output) if input.numel() == 0 else torch.mm(input.T, output)
-        return torch.floor(potential) if use_floor else potential
+        return torch.mm(input.T, output)
+    
+    @staticmethod
+    def _recurrent_potential(output: torch.Tensor, use_floor: bool, penalty: float):
+        """Function to caluclate the hebbian potentials based on coactivities
+            Args:
+                output: 1D tensor of current layer activity
+                use_floor: A boolean specifying if the potentials need to be floored to the nearest integer
+                penalty: A float value specifying the relative penalty in case of activation mismatch
+            Return:
+                Hebbian connection potentials
+        """
+        potential = torch.mm(output.T, output)
+        if use_floor:
+            #penalty = 1 - torch.exp(torch.tensor(-penalty*0.5)).item()
+            potential = torch.floor(potential)
+            potential = (potential >= 0)*potential + penalty*(potential < 0)*potential
+        
+        return potential
 
     @staticmethod
     def _normalize(output: torch.Tensor):
