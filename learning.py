@@ -1,68 +1,86 @@
 import torch
+from abc import ABC, abstractmethod
 
-class Organizer:
-    """Class to implement local learning in layers
+class Organizer(ABC):
+    """A template class to specify different types of learning rules as organizers
+        Values: Learning hyperparameters
+            lr: A float value specifying the learning rate
+            lr_decay:  A float value specifying the decay in the learning rate
+            beta: A float value specifying the memory in moving window averaging
+            penalty: A float value specifying relating anti-hebbian penalty
+    """
+    def __init__(self, lr: float=0.99, lr_decay: float=0.8,  beta: float=0.99, penalty: float=1.0):
+        self.lr = lr
+        self.lr_decay = lr_decay
+        self.beta = beta
+        self.penalty = penalty
+        
+    @abstractmethod
+    def step(self):
+        """Stores and updates potentials after each input
+        """
+        pass
+    
+    @abstractmethod
+    def organize(self):
+        """Transforms potentials into connection weights
+        """
+        pass
+    
+    @staticmethod
+    @abstractmethod
+    def _potential():
+        """Calculates potential based on inputs and outputs
+        """
+        pass
+
+class DiscriminationOrganizer(Organizer):
+    """Class to implement local learning in discrimination layers
         Values:
-            out_dim: Dimension of the layer
-            in_dim: Dimension of input to the layer
-            lr: Learning rate
-            lr_decay: Decay factor of the learning rate
-            beta1: A constant to decide window size of moving average
-            beta2: A constant to decide window size of moving average
-            feedforward_potential: 2D tensor to store the potential for feedforward connections
-            recurrent_potential: 2D tensor to store the potential for recurrent connections
+            potential_hebb: 2D tensor to store the hebbian potentials
+            potential_antihebb: 2D tensor to store the anti-hebbian potentials
             dropout: 1D boolean tensor indicating units to dropout
             counter: Total counts of the organize method
     """
-    def __init__(self, out_dim: int, in_dim: int, lr: float=0.99, lr_decay: float=0.8,  beta1: float=0.99, beta2: float=0.01, penalty: float=1.0):
-        self.lr = lr
-        self.lr_decay = lr_decay
-        self.beta1 = beta1
-        self.beta2 = beta2
-        self.penalty = penalty
-        self.feedforward_potential = torch.zeros(in_dim, out_dim)
-        self.recurrent_potential = torch.zeros(out_dim, out_dim)
+    def __init__(self, out_dim: int, in_dim: int, lr: float=0.99, lr_decay: float=0.8,  beta: float=0.99):
+        super().__init__(lr=lr, lr_decay=lr_decay, beta=beta)
+        self.potential_hebb = torch.zeros(in_dim, out_dim)
+        self.potential_antihebb = torch.zeros(out_dim, out_dim)
         self.dropout = torch.tensor([True]*out_dim)
         self.counter = 1
         
-    def step(self, output: torch.Tensor, input: torch.Tensor=torch.tensor([]), normalized: bool=False, use_dropout: bool=False, use_transform: bool=False, use_floor: bool=False):
+    def step(self, input: torch.Tensor, output: torch.Tensor):
         """Function to transform the layer activity and update potentials
             Args:
                 output: 1D tensor of current layer activity
                 input: Crresponding input tensor to the layer
-                normalized: A boolean specifying normalization of layer acitivity
-                use_dropout: A boolean specifying using dropouts
-                use_transform: A boolean specifying a specific non-linear transformation of the layer activity
-                use_floor: A boolean specifying if the potential values need to be floored to the nearest integer values
             Return:
                 Nothing 
         """
-        output = self._filter(output) if use_dropout else output
-        output = self._normalize(output) if normalized else output
-        output = self._transform(output) if use_transform else output
+        output = self._filter(output)
+        output = self._normalize(output)
+        
+        self.potential_hebb = self.beta*self.potential_hebb + (1-self.beta)*self._potential(input, output)
+        self.potential_antihebb = self.beta*self.potential_antihebb + (1-self.beta)*self._potential(output, output)
+        
 
-        self.recurrent_potential = self.beta1*self.recurrent_potential + self.beta2*self._recurrent_potential(output, use_floor, self.penalty)
-        if input.numel() != 0:
-            self.feedforward_potential = self.beta1*self.feedforward_potential + self.beta2*self._feedforward_potential(output, input)
-
-    def organize(self, weights: torch.Tensor=torch.tensor([])):
+    def organize(self, weights: torch.Tensor):
         """Function to produce updated weights based on potentials and previous weights
             Args:
-                weights: (optional) previous weights
+                weights: previous weights
             Return:
                 updated_weights: 2D tensor of updated weights
         """
-        if weights.numel() == 0:
-            updated_weights = (self.recurrent_potential > 0).float()
-            #self.feedforward_potential.fill_(0.0)
-            self.recurrent_potential.fill_(0.0)
-        else:
-            correction_factor = 1/(1 - self.beta1**self.counter)
-            updated_weights = (1 - self.lr)*weights + correction_factor*self.lr*(self.feedforward_potential - torch.mm(weights, self.recurrent_potential))
-            self.counter += 1
-            self.lr = self.lr_decay*self.lr
+        correction_factor = 1/(1 - self.beta**self.counter)
+        updated_weights = (1 - self.lr)*weights + correction_factor*self.lr*(self.potential_hebb - torch.mm(weights, self.potential_antihebb))
+        self.counter += 1
+        self.lr = self.lr_decay*self.lr
         
         return updated_weights
+    
+    @staticmethod
+    def _potential(x: torch.Tensor, y: torch.Tensor):
+        return torch.mm(x.T, y)
 
     def _filter(self, output: torch.Tensor):
         """Function to droput previously active cells and update the indices that need to be dropped in the next iteration
@@ -74,35 +92,6 @@ class Organizer:
         output = self.dropout.logical_not()*output
         self.dropout = output > 0
         return output
-    
-    @staticmethod
-    def _feedforward_potential(output: torch.Tensor, input: torch.Tensor):
-        """Function to caluclate the hebbian potentials based on coactivities
-            Args:
-                output: 1D tensor of current layer activity
-                input: Crresponding input tensor to the layer
-            Return:
-                Hebbian connection potentials
-        """
-        return torch.mm(input.T, output)
-    
-    @staticmethod
-    def _recurrent_potential(output: torch.Tensor, use_floor: bool, penalty: float):
-        """Function to caluclate the hebbian potentials based on coactivities
-            Args:
-                output: 1D tensor of current layer activity
-                use_floor: A boolean specifying if the potentials need to be floored to the nearest integer
-                penalty: A float value specifying the relative penalty in case of activation mismatch
-            Return:
-                Hebbian connection potentials
-        """
-        potential = torch.mm(output.T, output)
-        if use_floor:
-            #penalty = 1 - torch.exp(torch.tensor(-penalty*0.5)).item()
-            potential = torch.floor(potential)
-            potential = (potential >= 0)*potential + penalty*(potential < 0)*potential
-        
-        return potential
 
     @staticmethod
     def _normalize(output: torch.Tensor):
@@ -115,7 +104,41 @@ class Organizer:
         output_norm = torch.norm(output, p='fro').item()
         output = output/output_norm if output_norm != 0 else torch.zeros_like(output)
         return output
-    
+
+
+class ClassificationOrganizer(Organizer):
+    """Class to implement local learning the classification layers
+        Values:
+            potential: The recurrent potential in the layer
+    """
+    def __init__(self, out_dim: int, penalty: float=1.0):
+        super().__init__(penalty=penalty)
+        self.potential = torch.zeros(out_dim, out_dim)
+        
+    def step(self, output: torch.Tensor):
+        """Function to transform the layer activity and update potentials
+            Args:
+                output: 1D tensor of current layer activity
+            Return:
+                Nothing 
+        """
+        output = self._transform(output)
+        potential = self._potential(output)
+        self.potential += (potential >= 0)*potential + self.penalty*(potential < 0)*potential
+        
+    def organize(self):
+        """Function to produce updated weights based on potentials
+            Return:
+                updated_weights: 2D tensor of updated weights
+        """
+        updated_weights = (self.potential > 0).float()
+        self.potential.fill_(0.0)
+        return updated_weights
+        
+    @staticmethod
+    def _potential(x: torch.Tensor):
+        return torch.floor(torch.mm(x.T, x))
+        
     @staticmethod
     def _transform(output: torch.Tensor):
         """Function to perform a non-linear transformation of the layer activity

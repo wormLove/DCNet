@@ -4,7 +4,7 @@ from torch.linalg import matrix_rank
 from torch.nn.functional import normalize
 
 from initialization import Initializer
-from learning import Organizer
+from learning import DiscriminationOrganizer, ClassificationOrganizer
 
 class LayerThresholding(nn.Module):
     """Custom activation function based on the layer response
@@ -101,22 +101,19 @@ class Recurrent(nn.Module):
 class DiscriminationModule(nn.Module):
     """Discrimination module comprising of a linear layer, a recurrent layer and a layer thresholding activation
     """
-    def __init__(self, out_dim: int, initializer: Initializer, type: str='', lr: float=0.99, lr_decay: float=0.8, beta: float=0.99, alpha: float=1.0, penalty: float=1.0):
+    def __init__(self, out_dim: int, initializer: Initializer, lr: float=0.99, lr_decay: float=0.8, beta: float=0.99, alpha: float=1.0):
         super().__init__()
-        self.feedforward = Feedforward(initializer.weights(out_dim, type=type))
+        self.feedforward = Feedforward(initializer.weights(out_dim))
         self.recurrent = Recurrent(self.recurrent_weights)
         self.activation = LayerThresholding(alpha=alpha)
-        self.organizer = Organizer(out_dim, initializer.in_dim, lr=lr, lr_decay=lr_decay, beta1=beta, beta2=1-beta, penalty=penalty)
-        self.pad_labels = initializer.pad_labels
-        self.label_idx = initializer.in_dim - initializer.num_classes
+        self.organizer = DiscriminationOrganizer(out_dim, initializer.in_dim, lr=lr, lr_decay=lr_decay, beta=beta)
     
     def forward(self, input: torch.Tensor):
         assert input.dim() == 2 and input.shape[0] == 1, "input must be a row vector"
-        inp = self._mask(input, self.label_idx) if self.pad_labels else input
-        out_ = self.feedforward(inp)
+        out_ = self.feedforward(input)
         out_ = self.recurrent(out_)
         out_f = self.activation(out_)
-        self.organizer.step(out_f, input, normalized=True, use_dropout=True)
+        self.organizer.step(input, out_f)
         return out_f
     
     def organize(self):
@@ -126,23 +123,11 @@ class DiscriminationModule(nn.Module):
         self.feedforward.update(updated_weights)
         self.recurrent.update(self.recurrent_weights)
     
-    @staticmethod
-    def _mask(input: torch.Tensor, idx: int):
-        """Function to mask the padded labels in the inputs
-            Args:
-                input: 1D tensor corresponding to the input
-            Return:
-                masked_input: A clone of the input where label has been masked
-        """
-        masked_input = input.clone()
-        masked_input[idx:] = 0.0
-        return masked_input
-    
     @property
     def labels(self):
         """Function to predict the label for each unit's tuning property
         """
-        return torch.argmax(self.connections[self.label_idx:,:], dim=0)
+        return torch.argmax(self.connections[self.label_idx:,:], dim=0) #figure out how to assess labels
     
     @property
     def recurrent_weights(self):
@@ -160,19 +145,19 @@ class DiscriminationModule(nn.Module):
 class ClassificationModule(nn.Module):
     """Classification module comprising of two linear layers and a layer thresholding activation
     """
-    def __init__(self, in_dim: int, out_dim: int, initializer: Initializer, type: str='identity', beta: float=1.0, alpha: float=1.0, penalty: float=1.0):
+    def __init__(self, out_dim: int, initializer: Initializer, alpha: float=1.0, penalty: float=1.0):
         super().__init__()
-        self.feedforward1 = Feedforward(initializer.weights(out_dim, in_dim=in_dim, type=type))
+        self.feedforward1 = Feedforward(initializer.weights(out_dim))
         self.feedforward2 = Feedforward(torch.eye(out_dim))
         self.activation = LayerThresholding(alpha=alpha)
-        self.organizer = Organizer(out_dim, in_dim, beta1=beta, beta2=beta, penalty=penalty)
+        self.organizer = ClassificationOrganizer(out_dim, penalty=penalty)
     
     def forward(self, input: torch.Tensor):
         assert input.dim() == 2 and input.shape[0] == 1, "input must be a row vector"
         out_ = self.feedforward1(input)
         out_ = self.feedforward2(out_)
         out_f = self.activation(out_)
-        self.organizer.step(out_f, use_transform=True, use_floor=True)
+        self.organizer.step(out_f)
         return out_f
     
     def organize(self):
