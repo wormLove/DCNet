@@ -9,11 +9,11 @@ class Organizer(ABC):
             beta: A float value specifying the memory in moving window averaging
             penalty: A float value specifying relating anti-hebbian penalty
     """
-    def __init__(self, lr: float=0.99, lr_decay: float=0.8,  beta: float=0.99, penalty: float=1.0):
-        self.lr = lr
-        self.lr_decay = lr_decay
-        self.beta = beta
-        self.penalty = penalty
+    def __init__(self, **kwargs):
+        self.lr = kwargs.get('lr', 0.99)
+        self.lr_decay = kwargs.get('lr_decay', 0.8)
+        self.beta = kwargs.get('beta', 0.99)
+        self.penalty = kwargs.get('penalty', 1.0)
         
     @abstractmethod
     def step(self):
@@ -42,8 +42,8 @@ class DiscriminationOrganizer(Organizer):
             dropout: 1D boolean tensor indicating units to dropout
             counter: Total counts of the organize method
     """
-    def __init__(self, out_dim: int, in_dim: int, lr: float=0.99, lr_decay: float=0.8,  beta: float=0.99):
-        super().__init__(lr=lr, lr_decay=lr_decay, beta=beta)
+    def __init__(self, out_dim: int, in_dim: int, **kwargs):
+        super().__init__(**kwargs)
         self.potential_hebb = torch.zeros(in_dim, out_dim)
         self.potential_antihebb = torch.zeros(out_dim, out_dim)
         self.dropout = torch.tensor([True]*out_dim)
@@ -111,8 +111,8 @@ class ClassificationOrganizer(Organizer):
         Values:
             potential: The recurrent potential in the layer
     """
-    def __init__(self, out_dim: int, penalty: float=1.0):
-        super().__init__(penalty=penalty)
+    def __init__(self, out_dim: int, **kwargs):
+        super().__init__(**kwargs)
         self.potential = torch.zeros(out_dim, out_dim)
         
     def step(self, output: torch.Tensor):
@@ -134,6 +134,13 @@ class ClassificationOrganizer(Organizer):
         updated_weights = (self.potential > 0).float()
         self.potential.fill_(0.0)
         return updated_weights
+    
+    def prune(self, feedforward_weights: torch.Tensor, recurrent_weights: torch.Tensor):
+        assert recurrent_weights.dim() == 2 and recurrent_weights.shape[0] == recurrent_weights.shape[1]
+        pruned_weights = torch.logical_or(recurrent_weights, torch.eye(recurrent_weights.shape[0])).float()
+        while not (torch.sum(pruned_weights, dim=1) == 1).all():
+            pruned_weights = self._pruning_step(pruned_weights)
+        return torch.logical_or(feedforward_weights, pruned_weights).float()
         
     @staticmethod
     def _potential(x: torch.Tensor):
@@ -150,3 +157,14 @@ class ClassificationOrganizer(Organizer):
         out_f_transformed = -0.5*torch.ones_like(output)
         out_f_transformed[output > 0] = 1.0
         return out_f_transformed
+    
+    @staticmethod
+    def _pruning_step(weights: torch.Tensor):
+        weights_ = torch.tril(weights)
+        for row in reversed(weights_):
+            connected_idxs = row.nonzero().flatten()
+            if len(connected_idxs) > 1:
+                s_idx, d_idx = connected_idxs[-1], connected_idxs[-2]
+                weights_[:, d_idx] = torch.logical_or(weights_[:, s_idx], weights_[:, d_idx]).float()
+                weights_[:, s_idx].fill_(0.0)
+        return weights_

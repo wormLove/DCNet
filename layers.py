@@ -101,13 +101,13 @@ class Recurrent(nn.Module):
 class DiscriminationModule(nn.Module):
     """Discrimination module comprising of a linear layer, a recurrent layer and a layer thresholding activation
     """
-    def __init__(self, out_dim: int, initializer: Initializer, lr: float=0.99, lr_decay: float=0.8, beta: float=0.99, alpha: float=1.0):
+    def __init__(self, out_dim: int, initializer: Initializer, **kwargs):
         super().__init__()
         self.feedforward = Feedforward(initializer.weights(out_dim))
         self.recurrent = Recurrent(self.recurrent_weights)
-        self.activation = LayerThresholding(alpha=alpha)
-        self.organizer = DiscriminationOrganizer(out_dim, initializer.in_dim, lr=lr, lr_decay=lr_decay, beta=beta)
-    
+        self.activation = LayerThresholding(alpha=kwargs.get('alpha', 1.0))
+        self.organizer = DiscriminationOrganizer(out_dim, initializer.in_dim, **kwargs)
+        
     def forward(self, input: torch.Tensor):
         assert input.dim() == 2 and input.shape[0] == 1, "input must be a row vector"
         out_ = self.feedforward(input)
@@ -123,11 +123,10 @@ class DiscriminationModule(nn.Module):
         self.feedforward.update(updated_weights)
         self.recurrent.update(self.recurrent_weights)
     
-    @property
-    def labels(self):
+    def labels(self, label_idx: int):
         """Function to predict the label for each unit's tuning property
         """
-        return torch.argmax(self.connections[self.label_idx:,:], dim=0) #figure out how to assess labels
+        return torch.argmax(self.connections[-label_idx:,:], dim=0)
     
     @property
     def recurrent_weights(self):
@@ -145,12 +144,13 @@ class DiscriminationModule(nn.Module):
 class ClassificationModule(nn.Module):
     """Classification module comprising of two linear layers and a layer thresholding activation
     """
-    def __init__(self, out_dim: int, initializer: Initializer, alpha: float=1.0, penalty: float=1.0):
+    def __init__(self, out_dim: int, initializer: Initializer, **kwargs):
         super().__init__()
         self.feedforward1 = Feedforward(initializer.weights(out_dim))
         self.feedforward2 = Feedforward(torch.eye(out_dim))
-        self.activation = LayerThresholding(alpha=alpha)
-        self.organizer = ClassificationOrganizer(out_dim, penalty=penalty)
+        self.activation = LayerThresholding(alpha=kwargs.get('alpha', 1.0))
+        self.organizer = ClassificationOrganizer(out_dim, **kwargs)
+        self._pruning = False
     
     def forward(self, input: torch.Tensor):
         assert input.dim() == 2 and input.shape[0] == 1, "input must be a row vector"
@@ -165,9 +165,20 @@ class ClassificationModule(nn.Module):
         """
         updated_weights = self.organizer.organize()
         self.feedforward2.update(updated_weights, unit_norm=False)
+        if self._pruning:
+            pruned_weights = self.organizer.prune(self.connections, updated_weights)
+            self.feedforward1.update(pruned_weights, unit_norm=False)
+    
+    def pruning(self, value: str):
+        if value == 'on':
+            self._pruning = True
     
     @property
     def connections(self):
         """Function to get the connections among the output neurons
         """
+        return self.feedforward1.weights
+    
+    @property
+    def recurrent_weights(self):
         return self.feedforward2.weights

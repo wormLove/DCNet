@@ -171,7 +171,7 @@ class StateInitializer(Initializer):
         self._weights = weights
         
     def weights(self, out_dim: int):
-        assert out_dim == self._weights.shape[1], "layer cannot be initialized with the given weights tensor"
+        assert out_dim == self._weights.shape[1], "layer dimensions and weights tensor are incompatible"
         return self._weights
     
     @property

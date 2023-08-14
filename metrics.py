@@ -34,21 +34,21 @@ class Conncetedness(Metric):
         self.total = 0
         
 class Consistency(Metric):
-    def __init__(self, out_dim: int):
+    def __init__(self):
         super().__init__()
-        self.labels = torch.empty(out_dim, dtype=int)
+        self.labels = None
         self.consistency = 0.0
         
     def update(self, labels: torch.Tensor):
         assert labels.dim() == 1
-        
-        self.consistency = torch.sum(self.labels == labels).item()/len(labels)
+        if self.labels is not None:
+            self.consistency = torch.sum(self.labels == labels).item()/len(labels)
         self.labels = labels
         
     def compute(self):
         return self.consistency
     
     def reset(self):
-        self.labels.fill_(0)
+        self.labels = None
         self.consistency = 0.0
         
