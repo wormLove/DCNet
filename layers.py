@@ -167,7 +167,7 @@ class ClassificationModule(nn.Module):
         #self.feedforward2.update(updated_weights, unit_norm=False)
         if self._pruning:
             pruned_weights = self.organizer.prune(updated_weights)
-            self.feedforward1.update(pruned_weights, unit_norm=False)
+            self.feedforward1.update(self.connections.logical_or(pruned_weights).float(), unit_norm=False)
             self.feedforward2.update(torch.eye(updated_weights.shape[0]))
         else:
             self.feedforward2.update(updated_weights, unit_norm=False)
