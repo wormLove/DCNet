@@ -1,4 +1,5 @@
 import torch
+from collections import defaultdict
 from abc import ABC, abstractmethod
 
 class Organizer(ABC):
@@ -135,12 +136,33 @@ class ClassificationOrganizer(Organizer):
         self.potential.fill_(0.0)
         return updated_weights
     
-    def prune(self, feedforward_weights: torch.Tensor, recurrent_weights: torch.Tensor):
-        assert recurrent_weights.dim() == 2 and recurrent_weights.shape[0] == recurrent_weights.shape[1]
-        pruned_weights = torch.logical_or(recurrent_weights, torch.eye(recurrent_weights.shape[0])).float()
-        while not (torch.sum(pruned_weights, dim=1) == 1).all():
-            pruned_weights = self._pruning_step(pruned_weights)
-        return torch.logical_or(feedforward_weights, pruned_weights).float()
+    def prune(self, weights: torch.Tensor):
+        graph_dict = {idx: row.nonzero().flatten().tolist() for idx, row in enumerate(weights.fill_diagonal_(0.0))}
+        return self._prune(torch.zeros_like(self.potential).fill_diagonal_(1.0), graph_dict)
+
+    def _merging_step(self, graph_dict: dict):
+        _merged_to = defaultdict(list)
+        for k, v in graph_dict.items():
+            if len(v) == 1:
+                _merged_to[v[0]].append(k)
+        graph_dict = self._remove_end_nodes(graph_dict)
+        self._update_graph(graph_dict, _merged_to) if bool(graph_dict) else None
+        return graph_dict, _merged_to
+    
+    def _pruning_step(self, t: torch.Tensor, pruning_dict: dict):
+        for k, v in pruning_dict.items():
+            for item in v:
+                t[:,k] = (t[:,k]).logical_or(t[:,item])
+                t[:,item].fill_(0.0)
+    
+    def _prune(self, pruned_tensor: torch.Tensor, graph_dict: dict):
+        while bool(graph_dict):
+            graph_dict, _merged_to = self._merging_step(graph_dict)
+            self._pruning_step(pruned_tensor, _merged_to)
+            if not bool(_merged_to):
+                break
+        self._pruning_step(pruned_tensor, graph_dict) if bool(graph_dict) else None
+        return pruned_tensor
         
     @staticmethod
     def _potential(x: torch.Tensor):
@@ -159,12 +181,13 @@ class ClassificationOrganizer(Organizer):
         return out_f_transformed
     
     @staticmethod
-    def _pruning_step(weights: torch.Tensor):
-        weights_ = torch.tril(weights)
-        for row in reversed(weights_):
-            connected_idxs = row.nonzero().flatten()
-            if len(connected_idxs) > 1:
-                s_idx, d_idx = connected_idxs[-1], connected_idxs[-2]
-                weights_[:, d_idx] = torch.logical_or(weights_[:, s_idx], weights_[:, d_idx]).float()
-                weights_[:, s_idx].fill_(0.0)
-        return weights_
+    def _remove_end_nodes(graph_dict: dict):
+        return {k: v for k, v in graph_dict.items() if len(v) != 1}
+    
+    @staticmethod
+    def _update_graph(graph_dict: dict, _merged_to: dict):
+        for k, v in _merged_to.items():
+            if k in graph_dict:
+                for item in v:
+                    graph_dict[k].remove(item)
+

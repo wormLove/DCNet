@@ -155,8 +155,8 @@ class ClassificationModule(nn.Module):
     def forward(self, input: torch.Tensor):
         assert input.dim() == 2 and input.shape[0] == 1, "input must be a row vector"
         out_ = self.feedforward1(input)
-        out_ = self.feedforward2(out_)
-        out_f = self.activation(out_)
+        out_f = self.feedforward2(out_)
+        #out_f = self.activation(out_)
         self.organizer.step(out_f)
         return out_f
     
@@ -164,10 +164,13 @@ class ClassificationModule(nn.Module):
         """Function to form excitatory connections among the output neurons
         """
         updated_weights = self.organizer.organize()
-        self.feedforward2.update(updated_weights, unit_norm=False)
+        #self.feedforward2.update(updated_weights, unit_norm=False)
         if self._pruning:
-            pruned_weights = self.organizer.prune(self.connections, updated_weights)
+            pruned_weights = self.organizer.prune(updated_weights)
             self.feedforward1.update(pruned_weights, unit_norm=False)
+            self.feedforward2.update(torch.eye(updated_weights.shape[0]))
+        else:
+            self.feedforward2.update(updated_weights, unit_norm=False)
     
     def pruning(self, value: str):
         if value == 'on':
