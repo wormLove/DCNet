@@ -1,38 +1,48 @@
 import torch
 from torchmetrics import Metric
+from collections import defaultdict
 
 class Conncetedness(Metric):
     """A metric class to measure the self connectedness of a discrimination module
     """
     def __init__(self):
         super().__init__()
-        self.total = 0
-        self.correct = 0
-        self.wrong = 0
+        self.total = defaultdict(list)
+        self.correct = defaultdict(list)
+        self.wrong = defaultdict(list)
     
     def update(self, graph: torch.Tensor, labels: torch.Tensor):
         assert graph.dim() == 2 and labels.dim() == 1
         assert graph.shape[0] == graph.shape[1] == len(labels)
         
-        #graph.fill_diagonal_(0.0)
         for idx, row in enumerate(graph):
             row_label = labels[idx]
             connected_labels = labels[row.nonzero().squeeze()]
             disconnected_labels =  labels[(row == 0).nonzero().squeeze()]
-            self.correct += torch.sum(row_label == connected_labels).item()
-            self.wrong += torch.sum(row_label == disconnected_labels).item()
-            self.total += connected_labels.numel()
-        
-        #self.degree = torch.sum(graph)/len(labels)
+            self.correct[row_label.item()].append(torch.sum(row_label == connected_labels).item())
+            self.wrong[row_label.item()].append(torch.sum(row_label == disconnected_labels).item())
+            self.total[row_label.item()].append(connected_labels.numel())
     
     def compute(self):
-        return self.correct/self.total, self.correct/(self.correct + self.wrong)
+        N = len(self.correct)
+        precision = 0
+        recall = 0
+        for label, values in self.correct.items():
+            idx = torch.argmax(torch.tensor(values))
+            correct = values[idx.item()]
+            wrong = self.wrong[label][idx.item()]
+            total = self.total[label][idx.item()]
+            
+            precision += correct/total
+            recall += correct/(correct + wrong)
+        
+        return precision/N, recall/N
     
     def reset(self):
-        self.correct = 0
-        self.wrong = 0
-        self.total = 0
-        
+        self.correct = defaultdict(list)
+        self.wrong = defaultdict(list)
+        self.total = defaultdict(list)
+
 class Consistency(Metric):
     def __init__(self):
         super().__init__()
@@ -52,3 +62,16 @@ class Consistency(Metric):
         self.labels = None
         self.consistency = 0.0
         
+class Degree(Metric):
+    def __init__(self):
+        super().__init__()
+        self.degree = 0
+        
+    def update(self, weights: torch.Tensor):
+        self.degree = torch.mean(torch.sum(weights, dim=0)).item()
+    
+    def compute(self):
+        return self.degree
+    
+    def reset(self):
+        pass

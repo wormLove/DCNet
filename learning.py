@@ -1,6 +1,7 @@
 import torch
 from collections import defaultdict
 from abc import ABC, abstractmethod
+from typing import Dict
 
 class Organizer(ABC):
     """A template class to specify different types of learning rules as organizers
@@ -188,7 +189,7 @@ class Pruner(Organizer):
     def _convert_to_graph(self, weights: torch.Tensor):
         self.graph = {idx: row.nonzero().flatten().tolist() for idx, row in enumerate(weights.fill_diagonal_(0.0))}
         
-    def _prune_weights(self, pruned_weights: torch.Tensor, merging_steps: dict):
+    def _prune_weights(self, pruned_weights: torch.Tensor, merging_steps: Dict):
         for k, v in merging_steps.items():
             for item in v:
                 pruned_weights[:,k] = (pruned_weights[:,k]).logical_or(pruned_weights[:,item]).float()
@@ -197,7 +198,7 @@ class Pruner(Organizer):
     def _remove_end_nodes_from_graph(self):
         self.graph = {k: v for k, v in self.graph.items() if len(v) != 1}
     
-    def _update_graph(self, merging_steps: dict):
+    def _update_graph(self, merging_steps: Dict):
         self._remove_end_nodes_from_graph()
         if bool(self.graph):
             for k, v in merging_steps.items():
