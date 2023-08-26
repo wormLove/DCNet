@@ -129,12 +129,12 @@ class ClassificationOrganizer(Organizer):
         potential = self._potential(output)
         self.potential += (potential >= 0)*potential + self.penalty*(potential < 0)*potential
         
-    def organize(self):
+    def organize(self, weights: torch.Tensor):
         """Function to produce updated weights based on potentials
             Return:
                 updated_weights: 2D tensor of updated weights
         """
-        updated_weights = (self.potential > 0).float()
+        updated_weights = weights.logical_or(self.potential > 0).float()
         self.potential.fill_(0.0)
         return updated_weights
     
@@ -146,16 +146,16 @@ class ClassificationOrganizer(Organizer):
         return torch.floor(torch.mm(x.T, x))
         
     @staticmethod
-    def _transform(output: torch.Tensor):
+    def _transform(x: torch.Tensor):
         """Function to perform a non-linear transformation of the layer activity
             Args:
                 output: 1D tensor of current layer activity
             Return:
                 Transformed output
         """
-        out_f_transformed = -0.5*torch.ones_like(output)
-        out_f_transformed[output > 0] = 1.0
-        return out_f_transformed
+        x_transformed = -0.5*torch.ones_like(x)
+        x_transformed[x>0] = 1.0
+        return x_transformed
 
 
 class Pruner(Organizer):
@@ -209,3 +209,26 @@ class Pruner(Organizer):
     @staticmethod            
     def _potential():
         pass
+    
+class Teacher(Organizer):
+    def __init__(self, out_dim: int, t_alpha: int):
+        self.potential = torch.zeros(out_dim, out_dim)
+        self.t_alpha = t_alpha
+            
+    def step(self, output: torch.Tensor):
+        output = self._transform(output)
+        self.potential = self._potential(output)
+        
+    def organize(self, weights: torch.Tensor):
+        return weights.logical_or(self.potential).float()
+        
+    @staticmethod
+    def _potential(x: torch.Tensor):
+        return torch.mm(x.T, x)
+        
+    #@staticmethod
+    def _transform(self, x: torch.Tensor):
+        x_transformed = torch.zeros_like(x)
+        idxs = torch.argsort(x, descending=True).flatten()
+        x_transformed[0,idxs[:self.t_alpha]] = 1.0
+        return x_transformed

@@ -4,7 +4,7 @@ from torch.linalg import matrix_rank
 from torch.nn.functional import normalize
 
 from initialization import Initializer
-from learning import DiscriminationOrganizer, ClassificationOrganizer
+from learning import DiscriminationOrganizer, ClassificationOrganizer, Teacher
 
 class LayerThresholding(nn.Module):
     """Custom activation function based on the layer response
@@ -150,38 +150,38 @@ class ClassificationModule(nn.Module):
         self.feedforward2 = Feedforward(torch.eye(out_dim))
         self.activation = LayerThresholding(alpha=kwargs.get('alpha', 1.0))
         self.organizer = ClassificationOrganizer(out_dim, **kwargs)
-        self._pruning = False
+        self.teacher = Teacher(out_dim, t_alpha=kwargs.get('t_alpha', 5))
+        
     
     def forward(self, input: torch.Tensor):
         assert input.dim() == 2 and input.shape[0] == 1, "input must be a row vector"
+        self.teacher.step(input)
+        self.organizer.step(input)
         out_ = self.feedforward1(input)
-        out_f = self.feedforward2(out_)
-        #out_f = self.activation(out_)
-        self.organizer.step(out_f)
+        out_ = self.feedforward2(out_)
+        out_f = self.activation(out_)
+        #self.organizer.step(out_f)
         return out_f
     
     def organize(self):
         """Function to form excitatory connections among the output neurons
         """
-        updated_weights = self.organizer.organize()
-        #self.feedforward2.update(updated_weights, unit_norm=False)
-        if self._pruning:
-            pruned_weights = self.organizer.prune(updated_weights)
-            self.feedforward1.update((torch.mm(self.connections, pruned_weights) > 0.0).float(), unit_norm=False)
-            self.feedforward2.update(torch.eye(updated_weights.shape[0]))
-        else:
-            self.feedforward2.update(updated_weights, unit_norm=False)
+        updated_weights = self.organizer.organize(self.recurrent_weights)
+        self.feedforward2.update(updated_weights, unit_norm=False)
     
-    def pruning(self, value: str):
-        if value == 'on':
-            self._pruning = True
+    
+    def teach(self):
+        updated_weights = self.teacher.organize(self.recurrent_weights)
+        self.feedforward2.update(updated_weights, unit_norm=False)
     
     @property
     def connections(self):
-        """Function to get the connections among the output neurons
+        """Returns connections from the input to output neurons
         """
         return self.feedforward1.weights
     
     @property
     def recurrent_weights(self):
+        """Returns connections among the output neurons
+        """
         return self.feedforward2.weights
