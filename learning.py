@@ -1,5 +1,4 @@
 import torch
-from collections import defaultdict
 from abc import ABC, abstractmethod
 from typing import Dict
 
@@ -116,7 +115,6 @@ class ClassificationOrganizer(Organizer):
     def __init__(self, out_dim: int, **kwargs):
         super().__init__(**kwargs)
         self.potential = torch.zeros(out_dim, out_dim)
-        self.pruner = Pruner(out_dim)
         
     def step(self, output: torch.Tensor):
         """Function to transform the layer activity and update potentials
@@ -137,9 +135,7 @@ class ClassificationOrganizer(Organizer):
         updated_weights = weights.logical_or(self.potential > 0).float()
         self.potential.fill_(0.0)
         return updated_weights
-    
-    def prune(self, weights: torch.Tensor):
-        return self.pruner.organize(weights)
+
     
     @staticmethod
     def _potential(x: torch.Tensor):
@@ -159,56 +155,33 @@ class ClassificationOrganizer(Organizer):
 
 
 class Pruner(Organizer):
-    def __init__(self, out_dim: int):
-        self.out_dim = out_dim
-        self.graph = None
+    def __init__(self, out_dim: int, pruner_alpha: float):
+        self.potential = torch.zeros(out_dim, out_dim)
+        self.alpha = pruner_alpha
+    
+    def step(self, input: torch.Tensor, output: torch.Tensor):
+        input_transformed = self._transform(input)
+        output_transformed = self._transform(output)
         
+        input_potential = self._potential(input_transformed)
+        output_potential = self._potential(output_transformed)
+        
+        self.potential += input_potential.logical_xor(output_potential)
+    
     def organize(self, weights: torch.Tensor):
-        assert weights.dim() == 2
-        assert self.out_dim == weights.shape[0] ==weights.shape[1]
-        
-        self._convert_to_graph(weights)
-        pruned_weights = torch.eye(self.out_dim)
-        while bool(self.graph):
-            merging_steps = self.step()
-            if bool(merging_steps):
-                self._update_graph(merging_steps)
-                self._prune_weights(pruned_weights, merging_steps)
-            else:
-                self._prune_weights(pruned_weights, self.graph)
-                break
-        return pruned_weights
-    
-    def step(self):
-        merging_steps = defaultdict(list)
-        for k, v in self.graph.items():
-            if len(v) == 1:
-                merging_steps[v[0]].append(k)
-        return merging_steps
-    
-    def _convert_to_graph(self, weights: torch.Tensor):
-        self.graph = {idx: row.nonzero().flatten().tolist() for idx, row in enumerate(weights.fill_diagonal_(0.0))}
-        
-    def _prune_weights(self, pruned_weights: torch.Tensor, merging_steps: Dict):
-        for k, v in merging_steps.items():
-            for item in v:
-                pruned_weights[:,k] = (pruned_weights[:,k]).logical_or(pruned_weights[:,item]).float()
-                pruned_weights[:,item].fill_(0.0)
-    
-    def _remove_end_nodes_from_graph(self):
-        self.graph = {k: v for k, v in self.graph.items() if len(v) != 1}
-    
-    def _update_graph(self, merging_steps: Dict):
-        self._remove_end_nodes_from_graph()
-        if bool(self.graph):
-            for k, v in merging_steps.items():
-                if k in self.graph:
-                    for item in v:
-                        self.graph[k].remove(item)
+        thereshold = self.alpha*torch.std(self.potential).item()
+        weights_to_keep = self.potential.fill_diagonal_(0.0) <= thereshold
+        updated_weights = weights.logical_and(weights_to_keep).float()
+        self.potential.fill_(0.0)
+        return updated_weights
     
     @staticmethod            
-    def _potential():
-        pass
+    def _potential(x: torch.Tensor):
+        return torch.mm(x.T, x)
+    
+    @staticmethod
+    def _transform(x: torch.Tensor):
+        return (x > 0).float()
     
 class Teacher(Organizer):
     def __init__(self, out_dim: int, t_alpha: int):
