@@ -170,8 +170,8 @@ class ClassificationModule(nn.Module):
         """Function to form excitatory connections among the output neurons
         """
         #updated_weights = self.pruner.organize(self.recurrent_weights) if self._pruning else self.recurrent_weights
-        #updated_weights = self.organizer.organize(self.recurrent_weights)
-        updated_weights = self.pruner.organize(self.recurrent_weights) if self._pruning else self.organizer.organize(self.recurrent_weights)
+        updated_weights = self.organizer.organize(self.recurrent_weights)
+        updated_weights = self.pruner.organize(updated_weights) if self._pruning else updated_weights
         self.feedforward2.update(updated_weights, unit_norm=False)
     
     
