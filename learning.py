@@ -171,6 +171,7 @@ class Pruner(Organizer):
     def organize(self, weights: torch.Tensor):
         thereshold = self.alpha*torch.std(self.potential).item()
         weights_to_keep = self.potential.fill_diagonal_(0.0) <= thereshold
+        #print(weights_to_keep.count_nonzero().item())
         updated_weights = weights.logical_and(weights_to_keep).float()
         self.potential.fill_(0.0)
         return updated_weights
