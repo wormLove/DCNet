@@ -9,7 +9,7 @@ from learning import DiscriminationOrganizer, ClassificationOrganizer, Teacher, 
 class LayerThresholding(nn.Module):
     """Custom activation function based on the layer response
     """
-    def __init__(self, alpha: float=1.0):
+    def __init__(self, alpha: float = 1.0):
         super().__init__()
         self.alpha = alpha
     
@@ -28,7 +28,7 @@ class Feedforward(nn.Module):
     def forward(self, input: torch.Tensor):
         return torch.mm(input, self.weights)
     
-    def update(self, weights: torch.Tensor, unit_norm: bool=True):
+    def update(self, weights: torch.Tensor, unit_norm: bool = True):
         """A function to unpdate the wights of the layer and optionally normalize columns to unit norm
             Args: 
                 weights: A 2D tensor of updated weights
@@ -122,6 +122,9 @@ class DiscriminationModule(nn.Module):
         updated_weights = self.organizer.organize(self.connections)
         self.feedforward.update(updated_weights)
         self.recurrent.update(self.recurrent_weights)
+        
+    def reset(self):
+        self.organizer.reset()
     
     def labels(self, label_idx: int):
         """Function to predict the label for each unit's tuning property
@@ -181,6 +184,9 @@ class ClassificationModule(nn.Module):
         
     def pruning(self, val: str):
         self._pruning = True if val == 'on' else False
+        
+    def reset(self):
+        self.organizer.reset()
         
     @property
     def pruned_weights(self):

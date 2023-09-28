@@ -5,7 +5,8 @@ from torch.utils.data import DataLoader, Dataset, RandomSampler
 from torch.linalg import multi_dot
 from abc import ABC, abstractmethod
 
-from loading import SequentialLoader, RandomLoader
+#from loading import SequentialLoader, RandomLoader
+from transformations import Transform
 
 class Initializer(ABC):
     """A template class to form different types of initializers
@@ -28,14 +29,12 @@ class DatasetInitializer(Initializer):
     """Class to initialize dataset specicfic initial connection and a data loader
         Values:
             dataset: A dataset object
-            num_classes: An integer specifying number of classes in the dataset
-            pad_labels: A boolean value specifying whether labels should be padded in the data samples
+            transforms: A list of transformations applied to the inputs in sequence
             split: A float value specifying the fraction of dataset to use in intialization
     """
-    def __init__(self, dataset: Dataset, num_classes: int, pad_labels: bool=True, split: float=0.25):
+    def __init__(self, dataset: Dataset, transforms: Transform, split: float = 0.25):
         self.dataset = dataset
-        self.num_classes = num_classes
-        self.pad_labels = pad_labels
+        self.transforms = transforms
         self.split = split
 
     def weights(self, out_dim: int):
@@ -43,7 +42,7 @@ class DatasetInitializer(Initializer):
         """
         # get sample data
         batch_size = int(self.split*len(self.dataset)) # type: ignore
-        sample_data = self._sample_data(batch_size, self.pad_labels)
+        sample_data = self._sample_data(batch_size)
             
         # perform svd to get prinicpal axes
         U, S, V = torch.pca_lowrank(sample_data, q=sample_data.shape[1], center=True)
@@ -53,47 +52,46 @@ class DatasetInitializer(Initializer):
         # randomize the prinicpal axes
         randomizer = self._randomizer(out_dim, n)
         connections = multi_dot((V[:,:n], Sn_inv, randomizer.T))
-
         return connections
     
     @property
     def in_dim(self):
         """Returns input dimensions
         """
-        sample, _ = next(iter(self.dataset))
-        return len(torch.flatten(sample)) + self.num_classes
+        sample, target = next(iter(self.dataset))
+        return self.transforms(sample, label=target).shape[1]
     
-    def _sample_data(self, batch_size: int, pad_labels: bool):
+    def _sample_data(self, batch_size: int):
         """Function to return sample data with optional padded one-hot labels
             Args:
-                split: An integer specifying the sample data size
-                pad_labels: A bool specifying whether to pad one-hot label vectors
+                batch_size: An integer specifying the sample data size
             Return:
                 Sample data tensor
         """
-        loader = DataLoader(self.dataset, sampler=RandomSampler(self.dataset), batch_size=batch_size) # type: ignore
-        samples, targets = next(iter(loader))
-        pad = F.one_hot(targets, num_classes=self.num_classes) if pad_labels else torch.zeros(batch_size, self.num_classes)
-        return torch.cat((torch.reshape(samples, (batch_size, -1)), pad), dim=1)
+        batch, targets = next(iter(DataLoader(self.dataset, sampler=RandomSampler(self.dataset), batch_size=batch_size)))
+        sample_data = torch.empty(batch_size, self.in_dim)
+        for idx, sample in enumerate(batch):
+            sample_data[idx,:] = self.transforms(sample, label=targets[idx].item())
+        return sample_data
 
     @staticmethod
     def _randomizer(m: int, n: int):
-            """Function to generate a near-orthogonal tensor to randomize connections
-                Args:
-                    m: an integer specifying the output dimensions
-                    n: an integer specifying the input dimensions
-                    note: m >= n
-                Return:
-                    A near-orthogonal tensor of dimensions m by n
-            """
-            assert m >= n, f"m={m} should be greater than or equal to n={n}"
-            _, _, V = torch.pca_lowrank(torch.rand(n, n), q=n)
-            if m > n:
-                random_matrix = normalize(torch.randn(m-n, n), p=2, dim=1)
-                Vc = torch.mm(random_matrix, V)
-                return torch.vstack((V, Vc))
-            else:
-                return V
+        """Function to generate a near-orthogonal tensor to randomize connections
+            Args:
+                m: an integer specifying the output dimensions
+                n: an integer specifying the input dimensions
+                note: m >= n
+            Return:
+                A near-orthogonal tensor of dimensions m by n
+        """
+        assert m >= n, f"{m=} should be greater than or equal to {n=}"
+        _, _, V = torch.pca_lowrank(torch.rand(n, n), q=n)
+        if m > n:
+            random_matrix = normalize(torch.randn(m-n, n), p=2, dim=1)
+            Vc = torch.mm(random_matrix, V)
+            return torch.vstack((V, Vc))
+        else:
+            return V
     
     @staticmethod
     def _effective_dims(S: torch.Tensor):

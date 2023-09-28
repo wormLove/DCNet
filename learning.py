@@ -34,6 +34,12 @@ class Organizer(ABC):
         """Calculates potential based on inputs and outputs
         """
         pass
+    
+    @abstractmethod
+    def reset(self):
+        """Resets potential values back to zero
+        """
+        pass
 
 class DiscriminationOrganizer(Organizer):
     """Class to implement local learning in discrimination layers
@@ -82,6 +88,10 @@ class DiscriminationOrganizer(Organizer):
     @staticmethod
     def _potential(x: torch.Tensor, y: torch.Tensor):
         return torch.mm(x.T, y)
+    
+    def reset(self):
+        self.potential_hebb.fill_(0.0)
+        self.potential_antihebb.fill_(0.0)
 
     def _filter(self, output: torch.Tensor):
         """Function to droput previously active cells and update the indices that need to be dropped in the next iteration
@@ -133,13 +143,17 @@ class ClassificationOrganizer(Organizer):
                 updated_weights: 2D tensor of updated weights
         """
         updated_weights = weights.logical_or(self.potential > 0).float()
-        self.potential.fill_(0.0)
+        #self.potential.fill_(0.0)
+        self.reset()
         return updated_weights
 
     
     @staticmethod
     def _potential(x: torch.Tensor):
         return torch.floor(torch.mm(x.T, x))
+    
+    def reset(self):
+        self.potential.fill_(0.0)
         
     @staticmethod
     def _transform(x: torch.Tensor):
@@ -173,12 +187,16 @@ class Pruner(Organizer):
         weights_to_keep = self.potential.fill_diagonal_(0.0) <= thereshold
         #print(weights_to_keep.count_nonzero().item())
         updated_weights = weights.logical_and(weights_to_keep).float()
-        self.potential.fill_(0.0)
+        #self.potential.fill_(0.0)
+        self.reset()
         return updated_weights
     
     @staticmethod            
     def _potential(x: torch.Tensor):
         return torch.mm(x.T, x)
+    
+    def reset(self):
+        self.potential.fill_(0.0)
     
     @staticmethod
     def _transform(x: torch.Tensor):
@@ -199,6 +217,9 @@ class Teacher(Organizer):
     @staticmethod
     def _potential(x: torch.Tensor):
         return torch.mm(x.T, x)
+    
+    def reset(self):
+        self.potential.fill_(0.0)
         
     #@staticmethod
     def _transform(self, x: torch.Tensor):
