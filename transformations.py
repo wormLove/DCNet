@@ -52,6 +52,10 @@ class Mask(Transform):
 class ToVector(Transform):
     def __call__(self, x: torch.Tensor, **kwargs):
         return x.flatten().unsqueeze(0)
+    
+class Identity(Transform):
+    def __call__(self, x: torch.Tensor, **kwargs):
+        return x
         
     
 class Compose(Transform):
