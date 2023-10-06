@@ -1,6 +1,7 @@
 import torch
 from abc import ABC, abstractmethod
 from typing import Dict
+from torch.nn.functional import normalize
 
 class Organizer(ABC):
     """A template class to specify different types of learning rules as organizers
@@ -168,62 +169,58 @@ class ClassificationOrganizer(Organizer):
         return x_transformed
 
 
-class Pruner(Organizer):
-    def __init__(self, out_dim: int, pruner_alpha: float):
+class TripletOrganizer(Organizer):
+    def __init__(self, out_dim: int, **kwargs):
+        super().__init__(**kwargs)
+        self.margin = kwargs.get('margin', 1.0)
         self.potential = torch.zeros(out_dim, out_dim)
-        self.alpha = pruner_alpha
+        self.embeddings = torch.empty(0)
+        self.loss = 0.0
     
-    def step(self, input: torch.Tensor, output: torch.Tensor):
-        input_transformed = self._transform(input)
-        output_transformed = self._transform(output)
-        
-        input_potential = self._potential(input_transformed)
-        output_potential = self._potential(output_transformed)
-        
-        self.potential += input_potential.logical_xor(output_potential)
     
-    def organize(self, weights: torch.Tensor):
-        thereshold = self.alpha*torch.std(self.potential).item()
-        weights_to_keep = self.potential.fill_diagonal_(0.0) <= thereshold
-        #print(weights_to_keep.count_nonzero().item())
-        updated_weights = weights.logical_and(weights_to_keep).float()
-        #self.potential.fill_(0.0)
-        self.reset()
-        return updated_weights
-    
-    @staticmethod            
-    def _potential(x: torch.Tensor):
-        return torch.mm(x.T, x)
-    
-    def reset(self):
-        self.potential.fill_(0.0)
-    
-    @staticmethod
-    def _transform(x: torch.Tensor):
-        return (x > 0).float()
-    
-class Teacher(Organizer):
-    def __init__(self, out_dim: int, t_alpha: int):
-        self.potential = torch.zeros(out_dim, out_dim)
-        self.t_alpha = t_alpha
-            
     def step(self, output: torch.Tensor):
-        output = self._transform(output)
-        self.potential = self._potential(output)
-        
+        self._accumulate(output)
+        try:
+            emb_anc, emb_pos, emb_neg = self.embeddings[0].unsqueeze(0), self.embeddings[1].unsqueeze(0), self.embeddings[2].unsqueeze(0)
+            if self._loss(emb_anc, emb_pos, emb_neg) > 0:
+                self.potential = self.beta*self.potential + (1 - self.beta)*(self._potential(emb_anc, emb_pos) - self._potential(emb_anc, emb_neg))
+            self.embeddings = torch.empty(0)
+        except IndexError:
+            pass
+            
     def organize(self, weights: torch.Tensor):
-        return weights.logical_or(self.potential).float()
-        
-    @staticmethod
-    def _potential(x: torch.Tensor):
-        return torch.mm(x.T, x)
+        updated_weights = weights + self.lr*torch.mm(weights, self.potential)
+        running_loss = self.loss
+        self.loss = 0.0
+        return updated_weights, running_loss 
     
     def reset(self):
         self.potential.fill_(0.0)
+        self.embeddings = torch.empty(0)
+        self.loss = 0.0
+    
+    def _accumulate(self, output: torch.Tensor):
+        self.embeddings = torch.cat((self.embeddings, self._normalize(output)), dim=0)
         
-    #@staticmethod
-    def _transform(self, x: torch.Tensor):
-        x_transformed = torch.zeros_like(x)
-        idxs = torch.argsort(x, descending=True).flatten()
-        x_transformed[0,idxs[:self.t_alpha]] = 1.0
-        return x_transformed
+    def _loss(self, emb_anc: torch.Tensor, emb_pos: torch.Tensor, emb_neg: torch.Tensor):
+        d_pos = 1 - torch.mm(emb_anc, emb_pos.T).item()
+        d_neg = 1 - torch.mm(emb_anc, emb_neg.T).item()
+        loss = d_pos - d_neg + self.margin
+        self.loss += loss
+        return loss
+    
+    @staticmethod
+    def _potential(x: torch.Tensor, y: torch.Tensor):
+        return torch.mm(x.T, y)
+    
+    @staticmethod
+    def _normalize(output: torch.Tensor):
+        """Function to normalize layer activity to unit norm
+            Args:
+                output: 1D tensor of current layer activity
+            Return:
+                Normalized activity
+        """
+        return normalize(output, p=2, dim=1)
+    
+    
