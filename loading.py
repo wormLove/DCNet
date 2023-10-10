@@ -34,7 +34,7 @@ class RandomLoader:
 
 
 class SequentialLoader:
-    """A loader class to load sample from dataset randomly
+    """A loader class to load sample from dataset in ordered sequence
         Values:
             dataset: A dataset object
             transforms: A list of transformations applied to the inputs in sequence
@@ -91,3 +91,57 @@ class SequentialLoader:
                 break
         loading_sequence = [idx for lst in loading_sequence for idx in lst]
         return loading_sequence
+
+
+class TripletLoader:
+    """A loader class to load sample from dataset in triplets of anchor, positive, and negative samples
+        Values:
+            dataset: A dataset object
+            transforms: A list of transformations applied to the inputs in sequence
+    """
+    def __init__(self, dataset: Dataset, transforms: Transform):
+        self.dataset = dataset
+        self.transforms = transforms
+        
+    def __call__(self, nsamples: int):
+        self.nsamples = nsamples
+        self._initialize_loader()
+        return self
+    
+    def __iter__(self):
+        return self
+    
+    def __next__(self):
+        if self.current < self.nsamples:
+            transformed_sample = self.transforms(self.triplet[0][self.ret_idx], label=self.triplet[1][self.ret_idx].item())
+            self.ret_idx += 1
+            if self.ret_idx == 3:
+                self.triplet = self._triplet()
+                self.ret_idx = 0
+                self.current += 1
+            return transformed_sample  
+        raise StopIteration
+    
+    def _initialize_loader(self):
+        """Function to initialize the loader
+        """
+        self.loader = DataLoader(self.dataset, sampler=RandomSampler(self.dataset), batch_size=100)
+        self.triplet = self._triplet()
+        self.current = 0
+        self.ret_idx = 0
+        
+    def _triplet(self):
+        """Function to generate triplets
+        Returns:
+            triplets of samples and repective targets
+        """
+        anchor_idx, positive_idx, negative_idx = 0, float('inf'), float('inf')
+        s, t = next(iter(self.loader))
+        while torch.tensor(positive_idx).isinf() or torch.tensor(negative_idx).isinf():
+            try:
+                positive_idx = (t == t[0]).nonzero().flatten()[1].item()
+                negative_idx = (t != t[0]).nonzero().flatten()[1].item()
+            except IndexError:
+                s, t = next(iter(self.loader))
+        indices = [anchor_idx, positive_idx, negative_idx]
+        return s[indices], t[indices]

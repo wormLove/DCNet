@@ -4,7 +4,7 @@ from torch.linalg import matrix_rank
 from torch.nn.functional import normalize
 
 from initialization import Initializer
-from learning import DiscriminationOrganizer, ClassificationOrganizer, Teacher, Pruner
+from learning import DiscriminationOrganizer, ClassificationOrganizer, TripletOrganizer
 
 class LayerThresholding(nn.Module):
     """Custom activation function based on the layer response
@@ -151,46 +151,28 @@ class ClassificationModule(nn.Module):
         super().__init__()
         self.feedforward1 = Feedforward(initializer.weights(out_dim))
         self.feedforward2 = Feedforward(torch.eye(out_dim))
-        self.activation = LayerThresholding(alpha=kwargs.get('alpha', 1.0))
+        #self.activation = LayerThresholding(alpha=kwargs.get('alpha', 1.0))
         self.organizer = ClassificationOrganizer(out_dim, **kwargs)
-        #self.teacher = Teacher(out_dim, t_alpha=kwargs.get('t_alpha', 5))
-        self.pruner = Pruner(out_dim, pruner_alpha=kwargs.get('pruner_alpha', 6.0))
-        self._pruning = False
         
     
     def forward(self, input: torch.Tensor):
         assert input.dim() == 2 and input.shape[0] == 1, "input must be a row vector"
-        #self.teacher.step(input)
         self.organizer.step(input)
         out_ = self.feedforward1(input)
-        out_ = self.feedforward2(out_)
-        self.pruner.step(input, out_) if self._pruning else None
-        out_f = self.activation(out_)
+        out_f = self.feedforward2(out_)
+        #out_f = self.activation(out_)
+        #out_f = self.feedforward(input)
         #self.organizer.step(out_f)
         return out_f
     
     def organize(self):
         """Function to form excitatory connections among the output neurons
         """
-        #updated_weights = self.pruner.organize(self.recurrent_weights) if self._pruning else self.recurrent_weights
         updated_weights = self.organizer.organize(self.recurrent_weights)
-        updated_weights = self.pruner.organize(updated_weights) if self._pruning else updated_weights
         self.feedforward2.update(updated_weights, unit_norm=False)
-    
-    
-    #def teach(self):
-    #    updated_weights = self.teacher.organize(self.recurrent_weights)
-    #    self.feedforward2.update(updated_weights, unit_norm=False)
-        
-    def pruning(self, val: str):
-        self._pruning = True if val == 'on' else False
-        
+
     def reset(self):
         self.organizer.reset()
-        
-    @property
-    def pruned_weights(self):
-        return self.pruner.organize(self.recurrent_weights)
     
     @property
     def connections(self):
@@ -203,3 +185,23 @@ class ClassificationModule(nn.Module):
         """Returns connections among the output neurons
         """
         return self.feedforward2.weights
+    
+class AdaptationModule(nn.Module):
+    def __init__(self, out_dim: int, initializer: Initializer, **kwargs):
+        super().__init__()
+        self.feedforward = Feedforward(initializer.weights(out_dim))
+        self.organizer = TripletOrganizer(out_dim, **kwargs)
+        
+    def forward(self, input: torch.Tensor):
+        assert input.dim() == 2 and input.shape[0] == 1, "input must be a row vector"
+        out_f = self.feedforward(input)
+        self.organizer.step(out_f)
+        return out_f
+    
+    def organize(self):
+        updated_weights, _ = self.organizer.organize(self.connections)
+        self.feedforward.update(updated_weights, unit_norm=False)
+        
+    @property
+    def connections(self):
+        return self.feedforward.weights
