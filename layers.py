@@ -4,7 +4,7 @@ from torch.linalg import matrix_rank
 from torch.nn.functional import normalize
 
 from initialization import Initializer
-from learning import DiscriminationOrganizer, ClassificationOrganizer, TripletOrganizer
+from learning import DiscriminationOrganizer, ClassificationOrganizer, AdaptationOrganizer
 
 class LayerThresholding(nn.Module):
     """Custom activation function based on the layer response
@@ -190,12 +190,14 @@ class AdaptationModule(nn.Module):
     def __init__(self, out_dim: int, initializer: Initializer, **kwargs):
         super().__init__()
         self.feedforward = Feedforward(initializer.weights(out_dim))
-        self.organizer = TripletOrganizer(out_dim, **kwargs)
+        self.organizer = AdaptationOrganizer(out_dim, **kwargs)
+        self.activation = nn.ReLU()
         
     def forward(self, input: torch.Tensor):
         assert input.dim() == 2 and input.shape[0] == 1, "input must be a row vector"
-        out_f = self.feedforward(input)
-        self.organizer.step(out_f)
+        out_ = self.feedforward(input)
+        out_f = self.activation(out_)
+        self.organizer.step(input, out_f)
         return out_f
     
     def organize(self):

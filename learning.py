@@ -167,60 +167,70 @@ class ClassificationOrganizer(Organizer):
         x_transformed = -0.5*torch.ones_like(x)
         x_transformed[x>0] = 1.0
         return x_transformed
-
-
-class TripletOrganizer(Organizer):
+    
+class AdaptationOrganizer(Organizer):
     def __init__(self, out_dim: int, **kwargs):
         super().__init__(**kwargs)
         self.margin = kwargs.get('margin', 1.0)
         self.potential = torch.zeros(out_dim, out_dim)
-        self.embeddings = torch.empty(0)
+        self.input_embeddings = torch.empty(0)
+        self.output_embeddings = torch.empty(0)
         self.loss = 0.0
     
     
-    def step(self, output: torch.Tensor):
-        self._accumulate(output)
+    def step(self, input: torch.Tensor, output: torch.Tensor):
+        self._accumulate(input, output)
         try:
-            emb_anc, emb_pos, emb_neg = self.embeddings[0].unsqueeze(0), self.embeddings[1].unsqueeze(0), self.embeddings[2].unsqueeze(0)
-            if self._loss(emb_anc, emb_pos, emb_neg) > 0:
-                self.potential = self.beta*self.potential + (1 - self.beta)*(self._potential(emb_anc, emb_pos) - self._potential(emb_anc, emb_neg))
-            self.embeddings = torch.empty(0)
+            anc, pos, neg = self.input_embeddings[0].unsqueeze(0), self.input_embeddings[1].unsqueeze(0), self.input_embeddings[2].unsqueeze(0)
+            if self._current_loss() > 0:
+                filter_pos, filter_neg = self.filters
+                self.potential = self.beta*self.potential + (1-self.beta)*(filter_pos*self._potential(anc, pos) - filter_neg*self._potential(anc, neg))
+            self.reset()
         except IndexError:
             pass
             
     def organize(self, weights: torch.Tensor):
-        updated_weights = weights + self.lr*torch.mm(weights, self.potential)
+        updated_weights = weights + self.lr*torch.mm(self.potential, weights)
+        updated_weights = normalize(updated_weights, p=2, dim=0)
         running_loss = self.loss
         self.loss = 0.0
         return updated_weights, running_loss 
     
     def reset(self):
-        self.potential.fill_(0.0)
-        self.embeddings = torch.empty(0)
-        self.loss = 0.0
+        self.input_embeddings = torch.empty(0)
+        self.output_embeddings = torch.empty(0)
     
-    def _accumulate(self, output: torch.Tensor):
-        self.embeddings = torch.cat((self.embeddings, self._normalize(output)), dim=0)
+    def _accumulate(self, input: torch.Tensor, output: torch.Tensor):
+        self.input_embeddings = torch.cat((self.input_embeddings, self._normalize(input, output)), dim=0)
+        self.output_embeddings = torch.cat((self.output_embeddings, self._normalize(output, output)), dim=0)
         
-    def _loss(self, emb_anc: torch.Tensor, emb_pos: torch.Tensor, emb_neg: torch.Tensor):
+    def _current_loss(self):
+        emb_anc, emb_pos, emb_neg = self.output_embeddings[0].unsqueeze(0), self.output_embeddings[1].unsqueeze(0), self.output_embeddings[2].unsqueeze(0)
         d_pos = 1 - torch.mm(emb_anc, emb_pos.T).item()
         d_neg = 1 - torch.mm(emb_anc, emb_neg.T).item()
-        loss = d_pos - d_neg + self.margin
-        self.loss += loss
-        return loss
+        current_loss = d_pos - d_neg + self.margin
+        self.loss += current_loss
+        return current_loss
+    
+    @property
+    def filters(self):
+        filter_pos = (self.output_embeddings[0].unsqueeze(0) > 0).logical_and(self.output_embeddings[1].unsqueeze(0) > 0)
+        filter_neg = (self.output_embeddings[0].unsqueeze(0) > 0).logical_and(self.output_embeddings[2].unsqueeze(0) > 0)
+        return filter_pos, filter_neg
     
     @staticmethod
     def _potential(x: torch.Tensor, y: torch.Tensor):
-        return torch.mm(x.T, y)
+        return torch.mm(x.T, y) + torch.mm(y.T, x)
     
     @staticmethod
-    def _normalize(output: torch.Tensor):
-        """Function to normalize layer activity to unit norm
+    def _normalize(x: torch.Tensor, y: torch.Tensor):
+        """Function to normalize layer activity wrt other activity
             Args:
-                output: 1D tensor of current layer activity
+                x: 1D tensor of 1st instance of activity
+                y: 1D tensor of 2nd instance of activity
             Return:
                 Normalized activity
         """
-        return normalize(output, p=2, dim=1)
-    
-    
+        y_norm = torch.norm(y, p='fro').item()
+        x = x/y_norm if y_norm != 0 else torch.zeros_like(x)
+        return x
