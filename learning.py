@@ -16,6 +16,7 @@ class Organizer(ABC):
         self.lr_decay = kwargs.get('lr_decay', 0.8)
         self.beta = kwargs.get('beta', 0.99)
         self.penalty = kwargs.get('penalty', 1.0)
+        self.margin = kwargs.get('margin', 1.0)
         
     @abstractmethod
     def step(self):
@@ -35,12 +36,7 @@ class Organizer(ABC):
         """Calculates potential based on inputs and outputs
         """
         pass
-    
-    @abstractmethod
-    def reset(self):
-        """Resets potential values back to zero
-        """
-        pass
+
 
 class DiscriminationOrganizer(Organizer):
     """Class to implement local learning in discrimination layers
@@ -90,9 +86,6 @@ class DiscriminationOrganizer(Organizer):
     def _potential(x: torch.Tensor, y: torch.Tensor):
         return torch.mm(x.T, y)
     
-    def reset(self):
-        self.potential_hebb.fill_(0.0)
-        self.potential_antihebb.fill_(0.0)
 
     def _filter(self, output: torch.Tensor):
         """Function to droput previously active cells and update the indices that need to be dropped in the next iteration
@@ -144,18 +137,14 @@ class ClassificationOrganizer(Organizer):
                 updated_weights: 2D tensor of updated weights
         """
         updated_weights = weights.logical_or(self.potential > 0).float()
-        #self.potential.fill_(0.0)
-        self.reset()
+        self.potential.fill_(0.0)
         return updated_weights
 
     
     @staticmethod
     def _potential(x: torch.Tensor):
         return torch.floor(torch.mm(x.T, x))
-    
-    def reset(self):
-        self.potential.fill_(0.0)
-        
+
     @staticmethod
     def _transform(x: torch.Tensor):
         """Function to perform a non-linear transformation of the layer activity
@@ -171,11 +160,10 @@ class ClassificationOrganizer(Organizer):
 class AdaptationOrganizer(Organizer):
     def __init__(self, out_dim: int, **kwargs):
         super().__init__(**kwargs)
-        self.margin = kwargs.get('margin', 1.0)
         self.potential = torch.zeros(out_dim, out_dim)
         self.input_embeddings = torch.empty(0)
         self.output_embeddings = torch.empty(0)
-        self.loss = 0.0
+        self._loss = 0.0
     
     
     def step(self, input: torch.Tensor, output: torch.Tensor):
@@ -185,42 +173,35 @@ class AdaptationOrganizer(Organizer):
             if self._current_loss() > 0:
                 filter_pos, filter_neg = self.filters
                 self.potential = self.beta*self.potential + (1-self.beta)*(filter_pos*self._potential(anc, pos) - filter_neg*self._potential(anc, neg))
-            self.reset()
+            self._dump()
         except IndexError:
             pass
             
     def organize(self, weights: torch.Tensor):
         updated_weights = weights + self.lr*torch.mm(self.potential, weights)
         updated_weights = normalize(updated_weights, p=2, dim=0)
-        running_loss = self.loss
-        self.loss = 0.0
-        return updated_weights, running_loss 
+        self._loss = 0.0
+        return updated_weights
     
-    def reset(self):
-        self.input_embeddings = torch.empty(0)
-        self.output_embeddings = torch.empty(0)
+    @staticmethod
+    def _potential(x: torch.Tensor, y: torch.Tensor):
+        return torch.mm(x.T, y) + torch.mm(y.T, x)
     
     def _accumulate(self, input: torch.Tensor, output: torch.Tensor):
         self.input_embeddings = torch.cat((self.input_embeddings, self._normalize(input, output)), dim=0)
         self.output_embeddings = torch.cat((self.output_embeddings, self._normalize(output, output)), dim=0)
+    
+    def _dump(self):
+        self.input_embeddings = torch.empty(0)
+        self.output_embeddings = torch.empty(0)
         
     def _current_loss(self):
         emb_anc, emb_pos, emb_neg = self.output_embeddings[0].unsqueeze(0), self.output_embeddings[1].unsqueeze(0), self.output_embeddings[2].unsqueeze(0)
         d_pos = 1 - torch.mm(emb_anc, emb_pos.T).item()
         d_neg = 1 - torch.mm(emb_anc, emb_neg.T).item()
         current_loss = d_pos - d_neg + self.margin
-        self.loss += current_loss
+        self._loss += current_loss
         return current_loss
-    
-    @property
-    def filters(self):
-        filter_pos = (self.output_embeddings[0].unsqueeze(0) > 0).logical_and(self.output_embeddings[1].unsqueeze(0) > 0)
-        filter_neg = (self.output_embeddings[0].unsqueeze(0) > 0).logical_and(self.output_embeddings[2].unsqueeze(0) > 0)
-        return filter_pos, filter_neg
-    
-    @staticmethod
-    def _potential(x: torch.Tensor, y: torch.Tensor):
-        return torch.mm(x.T, y) + torch.mm(y.T, x)
     
     @staticmethod
     def _normalize(x: torch.Tensor, y: torch.Tensor):
@@ -234,3 +215,13 @@ class AdaptationOrganizer(Organizer):
         y_norm = torch.norm(y, p='fro').item()
         x = x/y_norm if y_norm != 0 else torch.zeros_like(x)
         return x
+    
+    @property
+    def filters(self):
+        filter_pos = (self.output_embeddings[0].unsqueeze(0) > 0).logical_and(self.output_embeddings[1].unsqueeze(0) > 0)
+        filter_neg = (self.output_embeddings[0].unsqueeze(0) > 0).logical_and(self.output_embeddings[2].unsqueeze(0) > 0)
+        return filter_pos, filter_neg
+    
+    @property
+    def loss(self):
+        return self._loss

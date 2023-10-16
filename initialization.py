@@ -138,11 +138,11 @@ class RandomInitializer(Initializer):
             num_classes: (Optional) An integer specifying number of classes in the dataset
             (Note: One of the dataset or the in_dim must be initialized)
     """
-    def __init__(self, in_dim: int=0, dataset: Dataset=None, num_classes: int=0):
+    def __init__(self, in_dim: int=0, dataset: Dataset = None, transforms: Transform = None):
         assert (dataset is not None) ^ (in_dim != 0), "either the dataset or the input dimensions must be specified but not both"
         self._in_dim = in_dim
         self.dataset = dataset
-        self.num_classes = num_classes
+        self.transforms = transforms
         
     def weights(self, out_dim: int):
         """Args: out_dim: An integer specifying the output dimensions of the layer
@@ -154,8 +154,8 @@ class RandomInitializer(Initializer):
         """Returns input dimensions
         """
         if self.dataset is not None:
-            sample, _ = next(iter(self.dataset))
-            return len(torch.flatten(sample)) + self.num_classes
+            sample, target = next(iter(self.dataset))
+            return self.transforms(sample, label=target).shape[1]
         return self._in_dim 
 
     

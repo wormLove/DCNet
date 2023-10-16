@@ -192,18 +192,26 @@ class AdaptationModule(nn.Module):
         self.feedforward = Feedforward(initializer.weights(out_dim))
         self.organizer = AdaptationOrganizer(out_dim, **kwargs)
         self.activation = nn.ReLU()
+        self._mode = 'train'
         
     def forward(self, input: torch.Tensor):
         assert input.dim() == 2 and input.shape[0] == 1, "input must be a row vector"
         out_ = self.feedforward(input)
         out_f = self.activation(out_)
-        self.organizer.step(input, out_f)
+        self.organizer.step(input, out_f) if self._mode == 'train' else None
         return out_f
     
     def organize(self):
-        updated_weights, _ = self.organizer.organize(self.connections)
+        updated_weights = self.organizer.organize(self.connections)
         self.feedforward.update(updated_weights, unit_norm=False)
         
     @property
     def connections(self):
         return self.feedforward.weights
+    
+    @property
+    def loss(self):
+        return self.organizer.loss
+    
+    def test_mode(self, val: str):
+        self._mode = 'test' if val == 'on' else 'train'
