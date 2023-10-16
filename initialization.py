@@ -138,7 +138,7 @@ class RandomInitializer(Initializer):
             num_classes: (Optional) An integer specifying number of classes in the dataset
             (Note: One of the dataset or the in_dim must be initialized)
     """
-    def __init__(self, in_dim: int=0, dataset: Dataset = None, transforms: Transform = None):
+    def __init__(self, in_dim: int = 0, dataset: Dataset = None, transforms: Transform = None):
         assert (dataset is not None) ^ (in_dim != 0), "either the dataset or the input dimensions must be specified but not both"
         self._in_dim = in_dim
         self.dataset = dataset

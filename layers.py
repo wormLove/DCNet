@@ -107,13 +107,14 @@ class DiscriminationModule(nn.Module):
         self.recurrent = Recurrent(self.recurrent_weights)
         self.activation = LayerThresholding(alpha=kwargs.get('alpha', 1.0))
         self.organizer = DiscriminationOrganizer(out_dim, initializer.in_dim, **kwargs)
+        self._mode = 'train'
         
     def forward(self, input: torch.Tensor):
         assert input.dim() == 2 and input.shape[0] == 1, "input must be a row vector"
         out_ = self.feedforward(input)
         out_ = self.recurrent(out_)
         out_f = self.activation(out_)
-        self.organizer.step(input, out_f)
+        self.organizer.step(input, out_f) if self._mode == 'train' else None
         return out_f
     
     def organize(self):
@@ -142,6 +143,9 @@ class DiscriminationModule(nn.Module):
         """Function to get the weights of the feedforward layer
         """
         return self.feedforward.weights
+    
+    def test_mode(self, val: str):
+        self._mode = 'test' if val == 'on' else 'train'
 
 
 class ClassificationModule(nn.Module):
