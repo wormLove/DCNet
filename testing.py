@@ -15,16 +15,16 @@ class BaseTester:
 
 
 class ModuleTester:
-    def __init__(self, network: nn.Module, dataset: Dataset, transforms: Transform):
-        self.network = network
+    def __init__(self, dataset: Dataset, transforms: Transform):
         self.dataset = dataset
         self.transforms = transforms
         self.loader = DataLoader(dataset, shuffle=True)
         self.tester = BaseTester()
     
-    def __call__(self, nsamples: int):
-        self.current = 0
+    def __call__(self, network: nn.Module, nsamples: int):
+        self.network = network
         self.nsamples = nsamples
+        self.current = 0
         return self
         
     def __iter__(self):
