@@ -2,40 +2,37 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 from transformations import Transform
+from tqdm import tqdm
 
 
-class BaseTester:
-    def __call__(self, network: nn.Module, input: torch.Tensor):
-        out = torch.empty(0)
-        for layer in network:
-            layer.test_mode('on')
-            out = torch.cat((out, layer(input)), dim=0)
-            layer.test_mode('off')
+class GenerateEmbeddings:
+    def __call__(self, layer: nn.Module, input: torch.Tensor):
+        layer.test_mode('on')
+        out = layer(input)
+        layer.test_mode('off')
         return out
 
-
-class ModuleTester:
-    def __init__(self, dataset: Dataset, transforms: Transform):
-        self.dataset = dataset
-        self.transforms = transforms
-        self.loader = DataLoader(dataset, shuffle=True)
-        self.tester = BaseTester()
-    
-    def __call__(self, network: nn.Module, nsamples: int):
+class TestModule:
+    def __init__(self, test_metric: str = 'generate_outputs'):
+        self.test_metric = GenerateEmbeddings()
+        
+    def __call__(self, network: nn.Module, test_dataset: Dataset, input_transforms: Transform, nsamples: int = None):
         self.network = network
-        self.nsamples = nsamples
-        self.current = 0
-        return self
+        self.test_dataset = test_dataset
+        self.input_transforms = input_transforms
+        self.nsamples = nsamples if nsamples is not None else len(test_dataset)
+        self.output = {idx: torch.empty(0) for idx, _ in enumerate(network)}
+        self.targets = []
         
-    def __iter__(self):
-        return self
-    
-    def __next__(self):
-        if self.current < self.nsamples:
-            input, target = next(iter(self.loader))
-            input = self.transforms(input, label=target.item())
-            out = self.tester(self.network, input)
-            self.current += 1
-            return out, target.item()
-        raise StopIteration
+        self._metric_call()
+        return self.output, self.targets
         
+    def _metric_call(self):
+        loader = DataLoader(self.test_dataset)
+        for inp_idx, (input, target) in enumerate(tqdm(loader, total=len(loader), desc='Testing')):
+            if inp_idx < self.nsamples:
+                self.targets.append(target.item())
+                input = self.input_transforms(input, label=target.item())
+                for idx, layer in enumerate(self.network):
+                    out = self.test_metric(layer, input)
+                    self.output[idx] = torch.cat((self.output[idx], out), dim=0)
