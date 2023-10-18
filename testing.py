@@ -32,7 +32,7 @@ class TestModule:
         for inp_idx, (input, target) in enumerate(tqdm(loader, total=len(loader), desc='Testing')):
             if inp_idx < self.nsamples:
                 self.targets.append(target.item())
-                input = self.input_transforms(input, label=target.item())
+                out_ = self.input_transforms(input, label=target.item())
                 for idx, layer in enumerate(self.network):
-                    out = self.test_metric(layer, input)
-                    self.output[idx] = torch.cat((self.output[idx], out), dim=0)
+                    out_ = self.test_metric(layer, out_)
+                    self.output[idx] = torch.cat((self.output[idx], out_), dim=0)
