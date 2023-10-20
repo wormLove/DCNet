@@ -107,14 +107,13 @@ class DiscriminationModule(nn.Module):
         self.recurrent = Recurrent(self.recurrent_weights)
         self.activation = LayerThresholding(alpha=kwargs.get('alpha', 1.0))
         self.organizer = DiscriminationOrganizer(out_dim, initializer.in_dim, **kwargs)
-        self._mode = 'train'
         
-    def forward(self, input: torch.Tensor):
+    def forward(self, input: torch.Tensor, train: bool = True):
         assert input.dim() == 2 and input.shape[0] == 1, "input must be a row vector"
         out_ = self.feedforward(input)
         out_ = self.recurrent(out_)
         out_f = self.activation(out_)
-        self.organizer.step(input, out_f) if self._mode == 'train' else None
+        self.organizer.step(input, out_f) if train else None
         return out_f
     
     def organize(self):
@@ -143,9 +142,6 @@ class DiscriminationModule(nn.Module):
         """Function to get the weights of the feedforward layer
         """
         return self.feedforward.weights
-    
-    def test_mode(self, val: str):
-        self._mode = 'test' if val == 'on' else 'train'
 
 
 class ClassificationModule(nn.Module):
@@ -159,9 +155,9 @@ class ClassificationModule(nn.Module):
         self.organizer = ClassificationOrganizer(out_dim, **kwargs)
         
     
-    def forward(self, input: torch.Tensor):
+    def forward(self, input: torch.Tensor, train: bool = True):
         assert input.dim() == 2 and input.shape[0] == 1, "input must be a row vector"
-        self.organizer.step(input)
+        self.organizer.step(input) if train else None
         out_ = self.feedforward1(input)
         out_f = self.feedforward2(out_)
         #out_f = self.activation(out_)
@@ -196,13 +192,12 @@ class AdaptationModule(nn.Module):
         self.feedforward = Feedforward(initializer.weights(out_dim))
         self.organizer = AdaptationOrganizer(out_dim, **kwargs)
         self.activation = nn.ReLU()
-        self._mode = 'train'
         
-    def forward(self, input: torch.Tensor):
+    def forward(self, input: torch.Tensor, train: bool = True):
         assert input.dim() == 2 and input.shape[0] == 1, "input must be a row vector"
         out_ = self.feedforward(input)
         out_f = self.activation(out_)
-        self.organizer.step(input, out_f) if self._mode == 'train' else None
+        self.organizer.step(input, out_f) if train else None
         return out_f
     
     def organize(self):

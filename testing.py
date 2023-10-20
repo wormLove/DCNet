@@ -7,9 +7,7 @@ from tqdm import tqdm
 
 class GenerateEmbeddings:
     def __call__(self, layer: nn.Module, input: torch.Tensor):
-        layer.test_mode('on')
-        out = layer(input)
-        layer.test_mode('off')
+        out = layer(input, train=False)
         return out
 
 class TestModule:
