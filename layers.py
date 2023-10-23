@@ -170,9 +170,6 @@ class ClassificationModule(nn.Module):
         """
         updated_weights = self.organizer.organize(self.recurrent_weights)
         self.feedforward2.update(updated_weights, unit_norm=False)
-
-    def reset(self):
-        self.organizer.reset()
     
     @property
     def connections(self):
@@ -211,6 +208,3 @@ class AdaptationModule(nn.Module):
     @property
     def loss(self):
         return self.organizer.loss
-    
-    def test_mode(self, val: str):
-        self._mode = 'test' if val == 'on' else 'train'
