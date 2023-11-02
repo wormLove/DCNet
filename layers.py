@@ -4,7 +4,7 @@ from torch.linalg import matrix_rank
 from torch.nn.functional import normalize
 
 from initialization import Initializer
-from learning import DiscriminationOrganizer, ClassificationOrganizer, AdaptationOrganizer
+from learning import DiscriminationOrganizer, ClassificationOrganizer, AdaptationOrganizer_u
 
 class LayerThresholding(nn.Module):
     """Custom activation function based on the layer response
@@ -187,7 +187,7 @@ class AdaptationModule(nn.Module):
     def __init__(self, out_dim: int, initializer: Initializer, **kwargs):
         super().__init__()
         self.feedforward = Feedforward(initializer.weights(out_dim))
-        self.organizer = AdaptationOrganizer(out_dim, **kwargs)
+        self.organizer = AdaptationOrganizer_u(out_dim, **kwargs)
         self.activation = nn.ReLU()
         
     def forward(self, input: torch.Tensor, train: bool = True):

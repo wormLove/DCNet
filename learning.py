@@ -17,6 +17,7 @@ class Organizer(ABC):
         self.beta = kwargs.get('beta', 0.99)
         self.penalty = kwargs.get('penalty', 1.0)
         self.margin = kwargs.get('margin', 1.0)
+        self.threshold = kwargs.get('threshold', 0.2)
         
     @abstractmethod
     def step(self):
@@ -221,6 +222,74 @@ class AdaptationOrganizer(Organizer):
         filter_pos = (self.output_embeddings[0].unsqueeze(0) > 0).logical_and(self.output_embeddings[1].unsqueeze(0) > 0)
         filter_neg = (self.output_embeddings[0].unsqueeze(0) > 0).logical_and(self.output_embeddings[2].unsqueeze(0) > 0)
         return filter_pos, filter_neg
+    
+    @property
+    def loss(self):
+        return self._loss
+    
+
+class AdaptationOrganizer_u(Organizer):
+    def __init__(self, out_dim: int, **kwargs):
+        super().__init__(**kwargs)
+        self.potential = torch.zeros(out_dim, out_dim)
+        self.input_last = torch.zeros(1, out_dim)
+        self.output_last = torch.zeros(1, out_dim)
+        self._loss = 0.0
+    
+    
+    def step(self, input: torch.Tensor, output: torch.Tensor):
+        anc = self._normalize(self.input_last, self.output_last)
+        exm = self._normalize(input, output)
+        sign = self._sign(input)
+        if self._current_loss(output, sign) > 0:
+            self.potential = self.beta*self.potential + sign*(1-self.beta)*self._filter(output)*self._potential(anc, exm)
+        self._collect(input, output)
+
+            
+    def organize(self, weights: torch.Tensor):
+        updated_weights = weights + self.lr*torch.mm(self.potential, weights)
+        updated_weights = normalize(updated_weights, p=2, dim=0)
+        self._loss = 0.0
+        return updated_weights
+    
+    @staticmethod
+    def _potential(x: torch.Tensor, y: torch.Tensor):
+        return torch.mm(x.T, y) + torch.mm(y.T, x)
+    
+    def _collect(self, input: torch.Tensor, output: torch.Tensor):
+        self.input_last = input
+        self.output_last = output
+    
+    def _sign(self, input: torch.Tensor):
+        intersection = (self.input_last > 0).logical_and(input > 0)
+        union = min((self.input_last > 0).sum().item(), (input > 0).sum().item())
+        similarity = intersection.sum().item()/(union+1)
+        return 1*(similarity > self.threshold) - 1*(similarity <= self.threshold)
+        
+    def _current_loss(self, output: torch.Tensor, sign: int):
+        anc = self._normalize(self.output_last, self.output_last)
+        exm = self._normalize(output, output)
+        d = 1 - torch.mm(anc, exm.T).item()
+        sign = 0.5*(sign+1)
+        current_loss = sign*d + (1-sign)*(self.margin-d)
+        self._loss += current_loss
+        return current_loss
+    
+    @staticmethod
+    def _normalize(x: torch.Tensor, y: torch.Tensor):
+        """Function to normalize layer activity wrt other activity
+            Args:
+                x: 1D tensor of 1st instance of activity
+                y: 1D tensor of 2nd instance of activity
+            Return:
+                Normalized activity
+        """
+        y_norm = torch.norm(y, p='fro').item()
+        x = x/y_norm if y_norm != 0 else torch.zeros_like(x)
+        return x
+    
+    def _filter(self, output: torch.Tensor):
+        return (self.output_last > 0).logical_and(output > 0)
     
     @property
     def loss(self):
