@@ -294,3 +294,108 @@ class AdaptationOrganizer_u(Organizer):
     @property
     def loss(self):
         return self._loss
+    
+class AnchorOrganizer(Organizer):
+    def __init__(self, out_dim: int, **kwargs):
+        super().__init__(**kwargs)
+        self.potential = torch.zeros(out_dim, out_dim)
+        self.anchors = torch.empty(0)
+        self.norms = []
+        self.input_embeddings = torch.empty(0)
+        self.output_embeddings = torch.empty(0)
+        self._loss = 0.0
+    
+    
+    def step(self, input: torch.Tensor, output: torch.Tensor):
+        #self._accumulate(input, output)
+        #try:
+        #    anc, pos, neg = self.input_embeddings[0].unsqueeze(0), self.input_embeddings[1].unsqueeze(0), self.input_embeddings[2].unsqueeze(0)
+        #    if self._current_loss() > 0:
+        #        filter_pos, filter_neg = self.filters
+        #        self.potential = self.beta*self.potential + (1-self.beta)*(filter_pos*self._potential(anc, pos) - filter_neg*self._potential(anc, neg))
+        #    self._dump()
+        #except IndexError:
+        #    pass
+        pos_idxs, neg_idxs = self._indexes(input)
+        input_normalized = self._normalize(input, output)
+        pos_potentials = self._potentials(input_normalized, pos_idxs)
+        neg_potentials = self._potentials(input_normalized, neg_idxs)
+        self._update(input, output, pos_idxs)
+            
+    def organize(self, weights: torch.Tensor):
+        updated_weights = weights + self.lr*torch.mm(self.potential, weights)
+        updated_weights = normalize(updated_weights, p=2, dim=0)
+        self._loss = 0.0
+        return updated_weights
+    
+    @staticmethod
+    def _potential(x: torch.Tensor, y: torch.Tensor):
+        return torch.mm(x.T, y) + torch.mm(y.T, x)
+    
+    def _accumulate(self, input: torch.Tensor, output: torch.Tensor):
+        self.input_embeddings = torch.cat((self.input_embeddings, self._normalize(input, output)), dim=0)
+        self.output_embeddings = torch.cat((self.output_embeddings, self._normalize(output, output)), dim=0)
+        
+    def _potentials(self, input: torch.Tensor, idxs: torch.Tensor):
+        potential = torch.zeros_like(self.potential)
+        if len(idxs) > 0:
+            for idx in idxs:
+                #insert filter here
+                potential += self._potential(input, self.anchors[idx.item()].unsqueeze(0))/self.norms[idx.item()]
+            potential = potential/len(idxs)
+        return potential
+    
+    def _dump(self):
+        self.input_embeddings = torch.empty(0)
+        self.output_embeddings = torch.empty(0)
+        
+    def _current_loss(self):
+        emb_anc, emb_pos, emb_neg = self.output_embeddings[0].unsqueeze(0), self.output_embeddings[1].unsqueeze(0), self.output_embeddings[2].unsqueeze(0)
+        d_pos = 1 - torch.mm(emb_anc, emb_pos.T).item()
+        d_neg = 1 - torch.mm(emb_anc, emb_neg.T).item()
+        current_loss = d_pos - d_neg + self.margin
+        self._loss += current_loss
+        return current_loss
+    
+    @staticmethod
+    def _normalize(x: torch.Tensor, y: torch.Tensor):
+        """Function to normalize layer activity wrt other activity
+            Args:
+                x: 1D tensor of 1st instance of activity
+                y: 1D tensor of 2nd instance of activity
+            Return:
+                Normalized activity
+        """
+        y_norm = torch.norm(y, p='fro').item()
+        x = x/y_norm if y_norm != 0 else torch.zeros_like(x)
+        return x
+    
+    @property
+    def filters(self):
+        filter_pos = (self.output_embeddings[0].unsqueeze(0) > 0).logical_and(self.output_embeddings[1].unsqueeze(0) > 0)
+        filter_neg = (self.output_embeddings[0].unsqueeze(0) > 0).logical_and(self.output_embeddings[2].unsqueeze(0) > 0)
+        return filter_pos, filter_neg
+    
+    @property
+    def loss(self):
+        return self._loss
+    
+    def positive_transformations(self, input: torch.Tensor, output: torch.Tensor):
+        pass
+    
+    def _update(self, input: torch.Tensor, output: torch.Tensor, pos_idxs: torch.Tensor):
+        if len(pos_idxs) > 0:
+            for idx in pos_idxs:
+                self.anchors[idx.item()] += input
+                self.norms[idx.item()] += torch.norm(output, p='fro')
+        else:        
+            self.anchors = torch.cat((self.anchors, input), dim=0)
+            self.norms.append(torch.norm(output, p='fro'))
+            
+    def _indexes(self, input: torch.Tensor):
+        anchors_normalized = normalize(self.anchors, p=2, dim=1)
+        input_normalized = normalize(input, p=2, dim=1)
+        similarities = torch.mm(input_normalized, anchors_normalized.T)
+        pos_idxs = (similarities > self.threshold).flatten().nonzero().squeeze()
+        neg_idxs = (similarities <= self.threshold).flatten().nonzero().squeeze()
+        return pos_idxs, neg_idxs
