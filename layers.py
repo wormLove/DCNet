@@ -4,7 +4,7 @@ from torch.linalg import matrix_rank
 from torch.nn.functional import normalize
 
 from initialization import Initializer
-from learning import DiscriminationOrganizer, ClassificationOrganizer, AdaptationOrganizer_u
+from learning import DiscriminationOrganizer, ClassificationOrganizer, AdaptationOrganizer_u, AnchorOrganizer
 
 class LayerThresholding(nn.Module):
     """Custom activation function based on the layer response
@@ -204,6 +204,39 @@ class AdaptationModule(nn.Module):
     @property
     def connections(self):
         return self.feedforward.weights
+    
+    @property
+    def loss(self):
+        return self.organizer.loss
+    
+
+class AdaptationModule2(nn.Module):
+    def __init__(self, out_dim: int, initializer: Initializer, **kwargs):
+        super().__init__()
+        self.softmax = nn.Softmax(dim=1)
+        self.feedforward = Feedforward(initializer.weights(out_dim))
+        self.organizer = AnchorOrganizer(out_dim, **kwargs)
+        self.activation = nn.ReLU()
+        
+    def forward(self, input: torch.Tensor, train: bool = True):
+        assert input.dim() == 2 and input.shape[0] == 1, "input must be a row vector"
+        #out_ = self.softmax(input)
+        out_ = self.feedforward(input)
+        out_f = self.activation(out_)
+        self.organizer.step(input, out_f) if train else None
+        return out_f
+    
+    def organize(self):
+        updated_weights = self.organizer.organize(self.connections)
+        self.feedforward.update(updated_weights, unit_norm=False)
+        
+    @property
+    def connections(self):
+        return self.feedforward.weights
+    
+    @property
+    def nanchors(self):
+        return self.organizer.nanchors
     
     @property
     def loss(self):

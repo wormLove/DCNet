@@ -299,10 +299,11 @@ class AnchorOrganizer(Organizer):
     def __init__(self, out_dim: int, **kwargs):
         super().__init__(**kwargs)
         self.potential = torch.zeros(out_dim, out_dim)
-        self.anchors = torch.empty(0)
-        self.norms = []
-        self.input_embeddings = torch.empty(0)
-        self.output_embeddings = torch.empty(0)
+        self.anchors_inp = torch.empty(0)
+        self.anchors_out = torch.empty(0)
+        #self.norms = []
+        #self.input_embeddings = torch.empty(0)
+        #self.output_embeddings = torch.empty(0)
         self._loss = 0.0
     
     
@@ -316,46 +317,69 @@ class AnchorOrganizer(Organizer):
         #    self._dump()
         #except IndexError:
         #    pass
-        pos_idxs, neg_idxs = self._indexes(input)
-        input_normalized = self._normalize(input, output)
-        pos_potentials = self._potentials(input_normalized, pos_idxs)
-        neg_potentials = self._potentials(input_normalized, neg_idxs)
-        self._update(input, output, pos_idxs)
+        #pos_idxs, neg_idxs, similarities = self._indexes(input)
+        self.current_input, self.current_output = input, output
+        pos_potential, neg_potential = self._potentials()
+        self.potential = self.beta*self.potential + (1-self.beta)*(neg_potential - pos_potential)
             
     def organize(self, weights: torch.Tensor):
         updated_weights = weights + self.lr*torch.mm(self.potential, weights)
-        updated_weights = normalize(updated_weights, p=2, dim=0)
-        self._loss = 0.0
+        #updated_weights = normalize(updated_weights, p=2, dim=0)
+        self._loss = updated_weights.sum()
+        self._dump()
+        #self._loss = 0.0
         return updated_weights
     
     @staticmethod
     def _potential(x: torch.Tensor, y: torch.Tensor):
         return torch.mm(x.T, y) + torch.mm(y.T, x)
     
-    def _accumulate(self, input: torch.Tensor, output: torch.Tensor):
-        self.input_embeddings = torch.cat((self.input_embeddings, self._normalize(input, output)), dim=0)
-        self.output_embeddings = torch.cat((self.output_embeddings, self._normalize(output, output)), dim=0)
+    #def _accumulate(self, input: torch.Tensor, output: torch.Tensor):
+    #    self.input_embeddings = torch.cat((self.input_embeddings, self._normalize(input, output)), dim=0)
+    #    self.output_embeddings = torch.cat((self.output_embeddings, self._normalize(output, output)), dim=0)
         
-    def _potentials(self, input: torch.Tensor, idxs: torch.Tensor):
-        potential = torch.zeros_like(self.potential)
-        if len(idxs) > 0:
-            for idx in idxs:
-                #insert filter here
-                potential += self._potential(input, self.anchors[idx.item()].unsqueeze(0))/self.norms[idx.item()]
-            potential = potential/len(idxs)
-        return potential
+    def _potentials(self):
+        similarities = self._similarity()
+        threshold = 0.5*(1 + self.margin)
+        pos_potential, neg_potential = torch.zeros_like(self.potential), torch.zeros_like(self.potential)
+        if similarities.nelement() > 0:
+            #threshold = 0.5*(1 + self.margin)
+            #pos_idxs = (similarities.flatten() > threshold).nonzero().squeeze(1)
+            #neg_idxs = (similarities.flatten() <= threshold).nonzero().squeeze(1)
+            #pos_idxs = similarities.argmax().unsqueeze(0).tolist()
+            #neg_idxs = list(set([*range(similarities.shape[1])]) - set(pos_idxs))
+            #self._accumulate(pos_potential, pos_idxs)
+            #self._accumulate(neg_potential, neg_idxs) if len(neg_idxs) > 0 else None
+            pos_idxs = (similarities.flatten() > threshold).nonzero().squeeze(1).tolist()
+            if len(pos_idxs) > 0:
+                neg_idxs = list(set(range(similarities.shape[1])) - set(pos_idxs))
+                self._accumulate(pos_potential, pos_idxs)
+                self._accumulate(neg_potential, neg_idxs) if len(neg_idxs) > 0 else None
+        self._update_anchors(similarities, threshold)
+            
+        return pos_potential, neg_potential
+            
+    
+    def _accumulate(self, potential: torch.Tensor, idxs: torch.Tensor):
+        for idx in idxs:
+            inp = self._normalize(self.current_input, self.current_output)
+            anc = self._normalize(self.anchors_inp[idx].unsqueeze(0), self.anchors_out[idx].unsqueeze(0))
+            filter = self.filter(self.current_output, self.anchors_out[idx].unsqueeze(0))
+            potential += filter*self._potential(inp, anc)
+        potential /= len(idxs)
+
     
     def _dump(self):
-        self.input_embeddings = torch.empty(0)
-        self.output_embeddings = torch.empty(0)
+        self.anchors_inp = torch.empty(0)
+        self.anchors_out = torch.empty(0)
         
-    def _current_loss(self):
-        emb_anc, emb_pos, emb_neg = self.output_embeddings[0].unsqueeze(0), self.output_embeddings[1].unsqueeze(0), self.output_embeddings[2].unsqueeze(0)
-        d_pos = 1 - torch.mm(emb_anc, emb_pos.T).item()
-        d_neg = 1 - torch.mm(emb_anc, emb_neg.T).item()
-        current_loss = d_pos - d_neg + self.margin
-        self._loss += current_loss
-        return current_loss
+    #def _current_loss(self):
+    #    emb_anc, emb_pos, emb_neg = self.output_embeddings[0].unsqueeze(0), self.output_embeddings[1].unsqueeze(0), self.output_embeddings[2].unsqueeze(0)
+    #    d_pos = 1 - torch.mm(emb_anc, emb_pos.T).item()
+    #    d_neg = 1 - torch.mm(emb_anc, emb_neg.T).item()
+    #    current_loss = d_pos - d_neg + self.margin
+    #    self._loss += current_loss
+    #    return current_loss
     
     @staticmethod
     def _normalize(x: torch.Tensor, y: torch.Tensor):
@@ -370,32 +394,55 @@ class AnchorOrganizer(Organizer):
         x = x/y_norm if y_norm != 0 else torch.zeros_like(x)
         return x
     
+    #@property
+    #def filters(self):
+    #    filter_pos = (self.output_embeddings[0].unsqueeze(0) > 0).logical_and(self.output_embeddings[1].unsqueeze(0) > 0)
+    #    filter_neg = (self.output_embeddings[0].unsqueeze(0) > 0).logical_and(self.output_embeddings[2].unsqueeze(0) > 0)
+    #    return filter_pos, filter_neg
+    
     @property
-    def filters(self):
-        filter_pos = (self.output_embeddings[0].unsqueeze(0) > 0).logical_and(self.output_embeddings[1].unsqueeze(0) > 0)
-        filter_neg = (self.output_embeddings[0].unsqueeze(0) > 0).logical_and(self.output_embeddings[2].unsqueeze(0) > 0)
-        return filter_pos, filter_neg
+    def nanchors(self):
+        return self.anchors_inp.shape[0]
     
     @property
     def loss(self):
         return self._loss
+        
     
-    def positive_transformations(self, input: torch.Tensor, output: torch.Tensor):
-        pass
+    @staticmethod
+    def filter(x: torch.Tensor, y: torch.Tensor):
+        return (x > 0).logical_and(y > 0)
     
-    def _update(self, input: torch.Tensor, output: torch.Tensor, pos_idxs: torch.Tensor):
-        if len(pos_idxs) > 0:
-            for idx in pos_idxs:
-                self.anchors[idx.item()] += input
-                self.norms[idx.item()] += torch.norm(output, p='fro')
-        else:        
-            self.anchors = torch.cat((self.anchors, input), dim=0)
-            self.norms.append(torch.norm(output, p='fro'))
+    def _update_anchors(self, similarities: torch.Tensor, threshold: float):
+        #threshold_u, threshold_l = 0.5*(1 + self.margin), 0.5*(1 - self.margin)
+        if similarities.nelement() == 0:
+            self.anchors_inp = torch.cat((self.anchors_inp, self.current_input), dim=0)
+            self.anchors_out = torch.cat((self.anchors_out, self.current_output), dim=0)
+        else:
+            pos_idxs = (similarities.flatten() > threshold).nonzero().squeeze(1)
+            if pos_idxs.nelement() > 0:
+                for idx in pos_idxs:
+                    if self._updatable(idx.item(), threshold):
+                        self.anchors_inp[idx.item()] = 0.5*(self.anchors_inp[idx.item()] + self.current_input.squeeze())
+                        self.anchors_out[idx.item()] = 0.5*(self.anchors_out[idx.item()] + self.current_output.squeeze())
+            elif all(similarities.flatten() < 1-threshold):
+                self.anchors_inp = torch.cat((self.anchors_inp, self.current_input), dim=0)
+                self.anchors_out = torch.cat((self.anchors_out, self.current_output), dim=0)        
             
-    def _indexes(self, input: torch.Tensor):
-        anchors_normalized = normalize(self.anchors, p=2, dim=1)
-        input_normalized = normalize(input, p=2, dim=1)
-        similarities = torch.mm(input_normalized, anchors_normalized.T)
-        pos_idxs = (similarities > self.threshold).flatten().nonzero().squeeze()
-        neg_idxs = (similarities <= self.threshold).flatten().nonzero().squeeze()
-        return pos_idxs, neg_idxs
+            
+    def _updatable(self, idx: int, threshold: float):
+        anchors_normalized = normalize(self.anchors_inp, p=2, dim=1)
+        new_anchor = 0.5*(self.anchors_inp[idx].unsqueeze(0) + self.current_input)
+        new_anchor_normalized = normalize(new_anchor, p=2, dim=1)
+        new_similarities = torch.mm(new_anchor_normalized, anchors_normalized.T)
+        return all(new_similarities.flatten() < 1-threshold)
+
+    
+    def _similarity(self):
+        input_normalized = normalize(self.current_input, p=2, dim=1)
+        try:
+            anchors_normalized = normalize(self.anchors_inp, p=2, dim=1)
+            similarities = torch.mm(input_normalized, anchors_normalized.T)
+        except IndexError:
+            similarities = torch.empty(0)
+        return similarities
