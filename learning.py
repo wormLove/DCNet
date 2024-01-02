@@ -1,7 +1,7 @@
 import torch
 from abc import ABC, abstractmethod
 from typing import Dict
-from torch.nn.functional import normalize
+from torch.nn.functional import normalize, one_hot
 
 class Organizer(ABC):
     """A template class to specify different types of learning rules as organizers
@@ -301,6 +301,7 @@ class AnchorOrganizer(Organizer):
         self.potential = torch.zeros(out_dim, out_dim)
         self.anchors_inp = torch.empty(0)
         self.anchors_out = torch.empty(0)
+        self.mean_rep = torch.zeros(1, out_dim)
         #self.norms = []
         #self.input_embeddings = torch.empty(0)
         #self.output_embeddings = torch.empty(0)
@@ -319,6 +320,7 @@ class AnchorOrganizer(Organizer):
         #    pass
         #pos_idxs, neg_idxs, similarities = self._indexes(input)
         self.current_input, self.current_output = input, output
+        self.mean_rep = self.beta*self.mean_rep + (1 - self.beta)*input
         pos_potential, neg_potential = self._potentials()
         self.potential = self.beta*self.potential + (1-self.beta)*(neg_potential - pos_potential)
             
@@ -422,20 +424,26 @@ class AnchorOrganizer(Organizer):
             pos_idxs = (similarities.flatten() > threshold).nonzero().squeeze(1)
             if pos_idxs.nelement() > 0:
                 for idx in pos_idxs:
-                    if self._updatable(idx.item(), threshold):
-                        self.anchors_inp[idx.item()] = 0.5*(self.anchors_inp[idx.item()] + self.current_input.squeeze())
-                        self.anchors_out[idx.item()] = 0.5*(self.anchors_out[idx.item()] + self.current_output.squeeze())
+                    if self._updatable(idx.item()):
+                        #self.anchors_inp[idx.item()] = 0.5*(self.anchors_inp[idx.item()] + self.current_input.squeeze())
+                        #self.anchors_out[idx.item()] = 0.5*(self.anchors_out[idx.item()] + self.current_output.squeeze())
+                        self.anchors_inp[idx.item()] = self.current_input
+                        self.anchors_out[idx.item()] = self.current_output
             elif all(similarities.flatten() < 1-threshold):
                 self.anchors_inp = torch.cat((self.anchors_inp, self.current_input), dim=0)
                 self.anchors_out = torch.cat((self.anchors_out, self.current_output), dim=0)        
             
             
-    def _updatable(self, idx: int, threshold: float):
-        anchors_normalized = normalize(self.anchors_inp, p=2, dim=1)
-        new_anchor = 0.5*(self.anchors_inp[idx].unsqueeze(0) + self.current_input)
-        new_anchor_normalized = normalize(new_anchor, p=2, dim=1)
-        new_similarities = torch.mm(new_anchor_normalized, anchors_normalized.T)
-        return all(new_similarities.flatten() < 1-threshold)
+    def _updatable(self, idx: int):
+        #anchors_normalized = normalize(self.anchors_inp, p=2, dim=1)
+        #new_anchor = 0.5*(self.anchors_inp[idx].unsqueeze(0) + self.current_input)
+        #new_anchor_normalized = normalize(new_anchor, p=2, dim=1)
+        #new_similarities = torch.mm(new_anchor_normalized, anchors_normalized.T)
+        #return all(new_similarities.flatten() < 1-threshold)
+        distance_prev = torch.norm(self.anchors_inp[idx] - self.mean_rep, p='fro')
+        distance_curr = torch.norm(self.current_input - self.mean_rep, p='fro')
+        return distance_prev < distance_curr
+        
 
     
     def _similarity(self):
@@ -446,3 +454,61 @@ class AnchorOrganizer(Organizer):
         except IndexError:
             similarities = torch.empty(0)
         return similarities
+    
+class AttentionOrganizer(Organizer):
+    def __init__(self, out_dim: int, **kwargs):
+        super().__init__(**kwargs)
+        self.keys_ = torch.empty(0)
+        self.values_ = torch.empty(0)
+        self.out_dim = out_dim
+        
+    
+    def step(self, inputs: torch.Tensor, targets: torch.Tensor):
+        targets = targets.long() if targets.nelement() > 0 else None
+        self._initialize_keys_values(inputs, targets) if self.keys_.nelement() == 0 else self._update_keys_values(inputs, targets)
+            
+        
+    
+    def organize(self):
+        self.keys_ = torch.empty(0)
+        self.values_ = torch.empty(0)
+        
+    @property
+    def _potential(self):
+        pass
+    
+    @property
+    def keys(self):
+        return self.keys_ 
+    
+    @property
+    def values(self):
+        return self.values_
+    
+    
+    def _updatable(self, input: torch.Tensor):
+        input_normalized = normalize(input, p=2, dim=1)
+        keys_normalized = normalize(self.keys_, p=2, dim=1) if self.keys_.nelement() > 0 else torch.zeros_like(input)
+        
+        similarities = torch.mm(input_normalized, keys_normalized.T)
+        return all(similarities.flatten() < self.threshold)
+    
+    def _indexes(self, inputs: torch.Tensor):
+        input_normalized = normalize(inputs, p=2, dim=1)
+        keys_normalized = normalize(self.keys_, p=2, dim=1)
+        
+        similarities = torch.mm(input_normalized, keys_normalized.T)
+        indexes = ((similarities < self.threshold).sum(dim=1) == len(self.keys_)).nonzero().squeeze(1)
+        return indexes
+    
+    def _initialize_keys_values(self, inputs: torch.Tensor, targets: torch.Tensor):
+        for idx, input in enumerate(inputs):
+            idx = torch.tensor(idx).unsqueeze(0)
+            if self._updatable(input.unsqueeze(0)):
+                self.keys_ = torch.cat((self.keys_, input.unsqueeze(0)), dim=0)
+                self.values_ = torch.cat((self.values_, one_hot(targets[idx], num_classes=self.out_dim)), dim=0) if targets is not None else torch.empty(0)
+                
+    def _update_keys_values(self, inputs: torch.Tensor, targets: torch.Tensor):
+        idxs = self._indexes(inputs)
+        self.keys_ = torch.cat((self.keys_, inputs[idxs]), dim=0)
+        self.values_ = torch.cat((self.values_, one_hot(targets[idxs], num_classes=self.out_dim)), dim=0) if targets is not None else torch.empty(0)
